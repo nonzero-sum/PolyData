@@ -3,9 +3,11 @@ import io
 import json
 import mimetypes
 import re
+import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
+import geopandas as gpd
 import pandas as pd
 import yaml
 
@@ -30,6 +32,8 @@ from .models import Resource, ResourceAPI, ResourceTable
 
 IDENTIFIER_MAX_LENGTH = 63
 NON_IDENTIFIER_CHARS = re.compile(r"[^a-z0-9_]+")
+LATITUDE_COLUMN_NAMES = {"lat", "latitude", "latitud"}
+LONGITUDE_COLUMN_NAMES = {"lon", "lng", "long", "longitude", "longitud"}
 
 
 def _document_filename(resource):
@@ -48,6 +52,17 @@ def _read_document_bytes(file_representation):
         return None
 
     document_file = file_representation.document.file
+    document_file.open("rb")
+    try:
+        return document_file.read()
+    finally:
+        document_file.close()
+
+def _read_document_file_bytes(document):
+    if document is None or not getattr(document, "file", None):
+        return None
+
+    document_file = document.file
     document_file.open("rb")
     try:
         return document_file.read()
@@ -189,6 +204,15 @@ def _detect_resource_type(resource):
     suffix = _document_suffix(resource)
     if suffix in SPATIAL_EXTENSIONS:
         return Resource.ResourceKind.SPATIAL
+    if suffix == ".json":
+        file_representation = getattr(resource, "file_representation", None)
+        raw_content = _read_document_bytes(file_representation)
+        if _json_bytes_look_like_geojson(raw_content):
+            return Resource.ResourceKind.SPATIAL
+    if suffix == ".csv":
+        file_representation = getattr(resource, "file_representation", None)
+        if file_representation is not None and _csv_has_coordinate_columns(file_representation):
+            return Resource.ResourceKind.SPATIAL
     if suffix in TABULAR_EXTENSIONS:
         return Resource.ResourceKind.TABULAR
     if suffix in IMAGE_EXTENSIONS:
@@ -279,6 +303,50 @@ def _normalize_dataframe_columns(dataframe):
     return normalized_dataframe, dict(zip(dataframe.columns, normalized_columns, strict=False))
 
 
+def _reserve_internal_column_names(dataframe, column_mapping, reserved_names):
+    normalized_dataframe = dataframe.copy()
+    updated_mapping = dict(column_mapping)
+    used_names = set(normalized_dataframe.columns)
+    renamed_columns = {}
+
+    for column_name in list(normalized_dataframe.columns):
+        if column_name not in reserved_names:
+            continue
+
+        used_names.discard(column_name)
+        replacement = _normalize_identifier(f"source_{column_name}", 1, used_names)
+        renamed_columns[column_name] = replacement
+
+        for source_name, normalized_name in updated_mapping.items():
+            if normalized_name == column_name:
+                updated_mapping[source_name] = replacement
+
+    if renamed_columns:
+        normalized_dataframe = normalized_dataframe.rename(columns=renamed_columns)
+
+    return normalized_dataframe, updated_mapping
+
+
+def _detect_csv_coordinate_columns(dataframe):
+    latitude_column = next(
+        (column_name for column_name in dataframe.columns if column_name in LATITUDE_COLUMN_NAMES),
+        None,
+    )
+    longitude_column = next(
+        (column_name for column_name in dataframe.columns if column_name in LONGITUDE_COLUMN_NAMES),
+        None,
+    )
+    if latitude_column and longitude_column:
+        return latitude_column, longitude_column
+    return None, None
+
+
+def _csv_has_coordinate_columns(file_representation):
+    dataframe, _column_mapping = _load_csv_dataframe(file_representation)
+    latitude_column, longitude_column = _detect_csv_coordinate_columns(dataframe)
+    return bool(latitude_column and longitude_column)
+
+
 def _build_ingested_table_name(resource):
     base_name = slugify(
         f"{resource.dataset.slug}_{resource.slug}",
@@ -294,6 +362,9 @@ def _build_ingested_table_name(resource):
 
 def _load_csv_dataframe(file_representation):
     raw_content = _read_document_bytes(file_representation)
+    return _load_csv_dataframe_from_bytes(raw_content)
+
+def _load_csv_dataframe_from_bytes(raw_content):
     if raw_content is None:
         raise ValueError("CSV ingestion requires a readable source document.")
 
@@ -310,9 +381,15 @@ def _load_csv_dataframe(file_representation):
     if dataframe.empty and len(dataframe.columns) == 0:
         raise ValueError("CSV file must contain a header row.")
 
+    dataframe, column_mapping = _normalize_dataframe_columns(dataframe)
+    dataframe, column_mapping = _reserve_internal_column_names(
+        dataframe,
+        column_mapping,
+        {"id"},
+    )
     dataframe = dataframe.reset_index(drop=True)
     dataframe.index = pd.RangeIndex(start=1, stop=len(dataframe) + 1, step=1, name="id")
-    return _normalize_dataframe_columns(dataframe)
+    return dataframe, column_mapping
 
 
 def _replace_tabular_table(schema_name, table_name, dataframe):
@@ -322,6 +399,7 @@ def _replace_tabular_table(schema_name, table_name, dataframe):
 
     try:
         with engine.begin() as db_connection:
+            db_connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {quoted_schema}"))
             dataframe.to_sql(
                 name=table_name,
                 con=db_connection,
@@ -377,7 +455,32 @@ def fetch_resource_table_rows(resource_table, page=1, page_size=10):
         total_count = cursor.fetchone()[0]
 
         cursor.execute(
-            f"SELECT * FROM {qualified_table} ORDER BY {connection.ops.quote_name(resource_table.primary_key)} ASC LIMIT %s OFFSET %s",
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s
+            ORDER BY ordinal_position
+            """,
+            [resource_table.schema_name, resource_table.table_name],
+        )
+        column_names = [row[0] for row in cursor.fetchall()]
+
+        if resource_table.geometry_field and resource_table.geometry_field in column_names:
+            select_columns = []
+            for column_name in column_names:
+                quoted_column = connection.ops.quote_name(column_name)
+                if column_name == resource_table.geometry_field:
+                    select_columns.append(
+                        f"ST_AsGeoJSON({quoted_column})::jsonb AS {quoted_column}"
+                    )
+                else:
+                    select_columns.append(quoted_column)
+            select_clause = ", ".join(select_columns)
+        else:
+            select_clause = "*"
+
+        cursor.execute(
+            f"SELECT {select_clause} FROM {qualified_table} ORDER BY {connection.ops.quote_name(resource_table.primary_key)} ASC LIMIT %s OFFSET %s",
             [page_size, offset],
         )
         columns = [column[0] for column in cursor.description]
@@ -422,6 +525,126 @@ def _sync_tabular_resource_table(resource, schema_name, table_name, row_count):
             _drop_table_if_needed(*previous_location)
 
 
+def _sync_spatial_resource_table(
+    resource,
+    schema_name,
+    table_name,
+    row_count,
+    geometry_field,
+    srid,
+    bbox,
+):
+    existing = resource.tables.filter(is_primary=True).order_by("id").first()
+    expected_values = {
+        "layer_name": resource.title,
+        "schema_name": schema_name,
+        "table_name": table_name,
+        "primary_key": "id",
+        "geometry_field": geometry_field,
+        "srid": srid,
+        "row_count": row_count,
+        "bbox": bbox,
+        "ogc_api_enabled": bool(geometry_field),
+        "is_primary": True,
+    }
+
+    if existing is None:
+        ResourceTable.objects.bulk_create([ResourceTable(resource=resource, **expected_values)])
+        return
+
+    previous_location = (existing.schema_name, existing.table_name)
+    updates = {
+        field_name: value
+        for field_name, value in expected_values.items()
+        if getattr(existing, field_name) != value
+    }
+    if updates:
+        ResourceTable.objects.filter(pk=existing.pk).update(**updates)
+        if previous_location != (schema_name, table_name):
+            _drop_table_if_needed(*previous_location)
+
+
+def _ingest_csv_resource(resource, file_representation, metadata):
+    schema_name = ensure_resource_data_schema()
+    dataframe, column_mapping = _load_csv_dataframe(file_representation)
+    table_name = _build_ingested_table_name(resource)
+    _replace_tabular_table(schema_name, table_name, dataframe)
+
+def _csv_bytes_have_coordinate_columns(raw_content):
+    dataframe, _column_mapping = _load_csv_dataframe_from_bytes(raw_content)
+    latitude_column, longitude_column = _detect_csv_coordinate_columns(dataframe)
+    return bool(latitude_column and longitude_column)
+
+
+def _json_bytes_look_like_geojson(raw_content):
+    if not raw_content:
+        return False
+
+    try:
+        payload = json.loads(raw_content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+
+    if not isinstance(payload, dict):
+        return False
+
+    geojson_type = str(payload.get("type", "")).strip()
+    if geojson_type == "FeatureCollection" and isinstance(payload.get("features"), list):
+        return True
+    if geojson_type == "Feature" and isinstance(payload.get("geometry"), dict):
+        return True
+    if geojson_type in {
+        "Point",
+        "MultiPoint",
+        "LineString",
+        "MultiLineString",
+        "Polygon",
+        "MultiPolygon",
+        "GeometryCollection",
+    }:
+        return True
+
+    return False
+
+def suggest_resource_kind_from_source(filename, current_kind=None, raw_content=None):
+    suffix = Path(filename or "").suffix.lower()
+    current_kind = current_kind or Resource.ResourceKind.DOCUMENT
+
+    if suffix in SPATIAL_EXTENSIONS:
+        return Resource.ResourceKind.SPATIAL
+    if suffix == ".json":
+        if _json_bytes_look_like_geojson(raw_content):
+            return Resource.ResourceKind.SPATIAL
+        return Resource.ResourceKind.API if current_kind == Resource.ResourceKind.API else current_kind
+    if suffix == ".csv":
+        try:
+            if raw_content is not None and _csv_bytes_have_coordinate_columns(raw_content):
+                return Resource.ResourceKind.SPATIAL
+        except ValueError:
+            pass
+        return Resource.ResourceKind.TABULAR
+    if suffix in {".tsv", ".parquet"}:
+        return Resource.ResourceKind.TABULAR
+    if suffix in IMAGE_EXTENSIONS:
+        return Resource.ResourceKind.IMAGE
+    if suffix in DOCUMENT_EXTENSIONS:
+        return Resource.ResourceKind.DOCUMENT
+    if suffix in {".yaml", ".yml"}:
+        return Resource.ResourceKind.API if current_kind == Resource.ResourceKind.API else current_kind
+    return current_kind
+
+def suggest_resource_kind_from_document(document, current_kind=None):
+    filename = getattr(document, "filename", "") or getattr(getattr(document, "file", None), "name", "")
+    raw_content = None
+    if Path(filename).suffix.lower() in {".csv", ".json", ".geojson"}:
+        raw_content = _read_document_file_bytes(document)
+    return suggest_resource_kind_from_source(
+        filename,
+        current_kind=current_kind,
+        raw_content=raw_content,
+    )
+
+
 def _ingest_csv_resource(resource, file_representation, metadata):
     schema_name = ensure_resource_data_schema()
     dataframe, column_mapping = _load_csv_dataframe(file_representation)
@@ -438,6 +661,197 @@ def _ingest_csv_resource(resource, file_representation, metadata):
     return {
         "processing_status": Resource.ProcessingStatus.READY,
         "processing_message": f"CSV ingested into {schema_name}.{table_name}.",
+    }
+
+
+def _load_spatial_csv_geodataframe(file_representation):
+    dataframe, column_mapping = _load_csv_dataframe(file_representation)
+    dataframe, column_mapping = _reserve_internal_column_names(
+        dataframe,
+        column_mapping,
+        {"geometry"},
+    )
+    latitude_column, longitude_column = _detect_csv_coordinate_columns(dataframe)
+    if not latitude_column or not longitude_column:
+        raise ValueError("CSV spatial ingestion requires latitude and longitude columns.")
+
+    latitude_values = pd.to_numeric(dataframe[latitude_column], errors="coerce")
+    longitude_values = pd.to_numeric(dataframe[longitude_column], errors="coerce")
+    valid_rows = latitude_values.notna() & longitude_values.notna()
+    if not valid_rows.any():
+        raise ValueError("CSV spatial ingestion requires numeric latitude and longitude values.")
+
+    if not latitude_values[valid_rows].between(-90, 90).all():
+        raise ValueError("Latitude values must be between -90 and 90.")
+    if not longitude_values[valid_rows].between(-180, 180).all():
+        raise ValueError("Longitude values must be between -180 and 180.")
+
+    geodataframe = gpd.GeoDataFrame(
+        dataframe.copy(),
+        geometry=gpd.points_from_xy(longitude_values, latitude_values),
+        crs="EPSG:4326",
+    )
+    geometry_field = "geometry"
+    return geodataframe, column_mapping, geometry_field, latitude_column, longitude_column
+
+
+def _ingest_spatial_csv_resource(resource, file_representation, metadata):
+    schema_name = ensure_resource_data_schema()
+    geodataframe, column_mapping, geometry_field, latitude_column, longitude_column = (
+        _load_spatial_csv_geodataframe(file_representation)
+    )
+    table_name = _build_ingested_table_name(resource)
+    _replace_spatial_table(schema_name, table_name, geodataframe, geometry_field)
+
+    bbox = []
+    if not geodataframe.empty:
+        total_bounds = geodataframe.total_bounds.tolist()
+        if len(total_bounds) == 4:
+            bbox = [float(value) for value in total_bounds]
+
+    srid = 4326
+    _sync_spatial_resource_table(
+        resource,
+        schema_name,
+        table_name,
+        len(geodataframe.index),
+        geometry_field,
+        srid,
+        bbox,
+    )
+
+    metadata["target_schema"] = schema_name
+    metadata["target_table"] = table_name
+    metadata["ingested_columns"] = list(geodataframe.columns)
+    metadata["source_column_map"] = column_mapping
+    metadata["geometry_field"] = geometry_field
+    metadata["row_count"] = len(geodataframe.index)
+    metadata["bbox"] = bbox
+    metadata["srid"] = srid
+    metadata["latitude_column"] = latitude_column
+    metadata["longitude_column"] = longitude_column
+
+    return {
+        "processing_status": Resource.ProcessingStatus.READY,
+        "processing_message": f"Spatial CSV ingested into {schema_name}.{table_name}.",
+    }
+
+
+def _load_geojson_geodataframe(file_representation):
+    raw_content = _read_document_bytes(file_representation)
+    if raw_content is None:
+        raise ValueError("GeoJSON ingestion requires a readable source document.")
+
+    with tempfile.NamedTemporaryFile(suffix=".geojson") as temp_file:
+        temp_file.write(raw_content)
+        temp_file.flush()
+        geodataframe = gpd.read_file(temp_file.name)
+
+    if geodataframe.empty and len(geodataframe.columns) == 0:
+        raise ValueError("GeoJSON file does not contain features.")
+
+    if geodataframe.geometry is None or geodataframe.geometry.name not in geodataframe.columns:
+        raise ValueError("GeoJSON file must include a geometry column.")
+
+    if geodataframe.crs is None:
+        geodataframe = geodataframe.set_crs(epsg=4326)
+    elif geodataframe.crs.to_epsg() != 4326:
+        geodataframe = geodataframe.to_crs(epsg=4326)
+
+    geometry_column = geodataframe.geometry.name
+    used_names = set()
+    normalized_columns = [
+        _normalize_identifier(column_name, index, used_names)
+        for index, column_name in enumerate(geodataframe.columns, start=1)
+    ]
+    column_mapping = dict(zip(geodataframe.columns, normalized_columns, strict=False))
+
+    normalized_geodataframe = geodataframe.copy()
+    normalized_geodataframe.columns = normalized_columns
+    normalized_geodataframe, column_mapping = _reserve_internal_column_names(
+        normalized_geodataframe,
+        column_mapping,
+        {"id"},
+    )
+    normalized_geometry_column = column_mapping[geometry_column]
+    normalized_geodataframe = normalized_geodataframe.set_geometry(normalized_geometry_column)
+    normalized_geodataframe = normalized_geodataframe.reset_index(drop=True)
+    normalized_geodataframe.index = pd.RangeIndex(
+        start=1,
+        stop=len(normalized_geodataframe) + 1,
+        step=1,
+        name="id",
+    )
+    return normalized_geodataframe, column_mapping, normalized_geometry_column
+
+
+def _replace_spatial_table(schema_name, table_name, geodataframe, geometry_field):
+    quoted_schema = connection.ops.quote_name(schema_name)
+    quoted_table = connection.ops.quote_name(table_name)
+    engine = create_engine(_sqlalchemy_database_url(), future=True)
+
+    try:
+        with engine.begin() as db_connection:
+            db_connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {quoted_schema}"))
+            geodataframe.to_postgis(
+                name=table_name,
+                con=db_connection,
+                schema=schema_name,
+                if_exists="replace",
+                index=True,
+                index_label="id",
+            )
+            db_connection.execute(
+                text(f"ALTER TABLE {quoted_schema}.{quoted_table} ADD PRIMARY KEY (id)")
+            )
+            db_connection.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS {connection.ops.quote_name(f'{table_name}_{geometry_field}_gist')} "
+                    f"ON {quoted_schema}.{quoted_table} USING GIST ({connection.ops.quote_name(geometry_field)})"
+                )
+            )
+    finally:
+        engine.dispose()
+
+
+def _ingest_geojson_resource(resource, file_representation, metadata):
+    schema_name = ensure_resource_data_schema()
+    geodataframe, column_mapping, geometry_field = _load_geojson_geodataframe(file_representation)
+    table_name = _build_ingested_table_name(resource)
+    _replace_spatial_table(schema_name, table_name, geodataframe, geometry_field)
+
+    bbox = []
+    if not geodataframe.empty:
+        total_bounds = geodataframe.total_bounds.tolist()
+        if len(total_bounds) == 4:
+            bbox = [float(value) for value in total_bounds]
+
+    srid = geodataframe.crs.to_epsg() if geodataframe.crs is not None else 4326
+    if srid is None:
+        srid = 4326
+
+    _sync_spatial_resource_table(
+        resource,
+        schema_name,
+        table_name,
+        len(geodataframe.index),
+        geometry_field,
+        srid,
+        bbox,
+    )
+
+    metadata["target_schema"] = schema_name
+    metadata["target_table"] = table_name
+    metadata["ingested_columns"] = list(geodataframe.columns)
+    metadata["source_column_map"] = column_mapping
+    metadata["geometry_field"] = geometry_field
+    metadata["row_count"] = len(geodataframe.index)
+    metadata["bbox"] = bbox
+    metadata["srid"] = srid
+
+    return {
+        "processing_status": Resource.ProcessingStatus.READY,
+        "processing_message": f"GeoJSON ingested into {schema_name}.{table_name}.",
     }
 
 
@@ -488,9 +902,21 @@ def process_resource(resource):
             ensure_resource_data_schema()
             metadata.setdefault("ingestion", "postgis")
             metadata.setdefault("target_schema", settings.RESOURCE_DATA_SCHEMA)
-            processing_overrides["processing_message"] = (
-                "Spatial ingestion will be implemented next for GeoPackage and GeoJSON."
-            )
+            if _document_suffix(resource) == ".csv" and file_representation is not None:
+                processing_overrides.update(
+                    _ingest_spatial_csv_resource(resource, file_representation, metadata)
+                )
+            elif (
+                _document_suffix(resource) in {".geojson", ".json"}
+                and file_representation is not None
+            ):
+                processing_overrides.update(
+                    _ingest_geojson_resource(resource, file_representation, metadata)
+                )
+            else:
+                processing_overrides["processing_message"] = (
+                    "Spatial resource detected. Synchronous ingestion is currently implemented for CSV with lat/lon and GeoJSON files only."
+                )
         elif detected_type == Resource.ResourceKind.API:
             metadata.setdefault("ingestion", "external")
             metadata.setdefault("preview_kind", "api")

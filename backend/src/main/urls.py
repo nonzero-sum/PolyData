@@ -1,5 +1,6 @@
 from django.contrib import admin
-from django.urls import include, path
+from django.contrib.staticfiles.views import serve as staticfiles_serve
+from django.urls import include, path, re_path
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularRedocView,
@@ -29,6 +30,8 @@ urlpatterns = [
     path("oidc/", include("oidc_provider.urls", namespace="oidc_provider")),
     # Accounts
     path("account/", include("account.urls")),
+    # pygeoapi static assets
+    re_path(r"^geoapi/static/(?P<path>.*)$", staticfiles_serve),
     # pygeoapi endpoint
     path("geoapi/", include(pygeoapi_urls)),
     # wagtail document serving

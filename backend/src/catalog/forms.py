@@ -1,13 +1,16 @@
 import json
+import re
 
 from django import forms
 
 from wagtail.admin.forms.models import WagtailAdminModelForm
+from wagtail.documents import get_document_model
 from wagtail.documents.forms import BaseDocumentForm
 
 from .file_formats import allowed_upload_extensions_accept, validate_allowed_upload
 from .metadata_schemas import dublin_core_editable_fields, supported_metadata_schemas_display
 from .models import Dataset, Resource
+from .services import suggest_resource_kind_from_document
 
 
 class CatalogDocumentForm(BaseDocumentForm):
@@ -104,11 +107,75 @@ class ResourceForm(WagtailAdminModelForm):
         model = Resource
         fields = "__all__"
 
+    INLINE_DOCUMENT_FIELD_PATTERN = re.compile(r"-(?:\d+-)?document$")
+    INLINE_API_BASE_URL_PATTERN = re.compile(r"-(?:\d+-)?base_url$")
+
+    def _selected_document(self):
+        if self.is_bound:
+            document_model = get_document_model()
+            for key, value in self.data.items():
+                if not self.INLINE_DOCUMENT_FIELD_PATTERN.search(key):
+                    continue
+
+                document_id = (value or "").strip()
+                if not document_id:
+                    continue
+
+                try:
+                    return document_model.objects.get(pk=document_id)
+                except (document_model.DoesNotExist, ValueError, TypeError):
+                    continue
+
+        file_representation = getattr(self.instance, "file_representation", None)
+        if file_representation is not None and file_representation.document is not None:
+            return file_representation.document
+        return None
+
+    def _has_api_source(self):
+        if self.is_bound:
+            for key, value in self.data.items():
+                if self.INLINE_API_BASE_URL_PATTERN.search(key) and (value or "").strip():
+                    return True
+        return getattr(self.instance, "api_representation", None) is not None
+
+    def _suggested_resource_kind(self):
+        current_kind = self.data.get(self.add_prefix("resource_kind")) or getattr(
+            self.instance,
+            "resource_kind",
+            Resource.ResourceKind.DOCUMENT,
+        )
+
+        if self._has_api_source():
+            return Resource.ResourceKind.API
+
+        document = self._selected_document()
+        if document is None:
+            return current_kind
+
+        return suggest_resource_kind_from_document(document, current_kind=current_kind)
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        resource_kind_field = self.fields.get("resource_kind")
         storage_field = self.fields.get("storage_kind")
         metadata_field = self.fields.get("metadata")
+        suggested_resource_kind = self._suggested_resource_kind()
+
+        if resource_kind_field is not None:
+            resource_kind_field.initial = suggested_resource_kind
+            resource_kind_field.help_text = (
+                "Suggested from the attached source when possible. "
+                "CSV files with latitude/longitude columns are suggested as Spatial."
+            )
+
+            if self.is_bound:
+                posted_resource_kind = self.data.get(self.add_prefix("resource_kind"), "")
+                if posted_resource_kind in {"", Resource.ResourceKind.DOCUMENT}:
+                    mutable_data = self.data.copy()
+                    mutable_data[self.add_prefix("resource_kind")] = suggested_resource_kind
+                    self.data = mutable_data
+
         if metadata_field is not None:
             metadata_field.help_text = (
                 "Technical metadata managed by the system for ingestion, previews, and processing state."
@@ -122,11 +189,7 @@ class ResourceForm(WagtailAdminModelForm):
         if storage_field is None:
             return
 
-        resource_kind = self.data.get(self.add_prefix("resource_kind")) or getattr(
-            self.instance,
-            "resource_kind",
-            Resource.ResourceKind.DOCUMENT,
-        )
+        resource_kind = self.data.get(self.add_prefix("resource_kind")) or suggested_resource_kind
 
         if Resource.supports_postgres_storage(resource_kind):
             storage_field.choices = [

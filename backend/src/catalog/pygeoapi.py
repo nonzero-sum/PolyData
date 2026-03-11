@@ -6,6 +6,17 @@ from django.db import OperationalError, ProgrammingError
 from pygeoapi.openapi import get_oas
 
 
+def _provider_table_reference(schema_name, table_name):
+    normalized_schema = (schema_name or "").strip()
+    normalized_table = (table_name or "").strip()
+
+    if "." in normalized_table:
+        table_schema, unqualified_table = normalized_table.split(".", 1)
+        return (table_schema.strip() or normalized_schema), unqualified_table.strip()
+
+    return normalized_schema, normalized_table
+
+
 def _resource_bbox(resource):
     bbox = resource.bbox
     if isinstance(bbox, list) and len(bbox) in (4, 6):
@@ -33,6 +44,10 @@ def build_pygeoapi_resources_from_catalog():
     )
 
     for resource in queryset:
+        provider_schema, provider_table = _provider_table_reference(
+            resource.schema_name,
+            resource.table_name,
+        )
         resources[resource.collection_name] = {
             "type": "collection",
             "title": resource.layer_name or resource.resource.title,
@@ -57,9 +72,9 @@ def build_pygeoapi_resources_from_catalog():
                         or os.environ.get("DB_DATABASE", "postgres"),
                         "user": os.environ.get("DB_USER", "postgres"),
                         "password": os.environ.get("DB_PASSWORD", ""),
-                        "search_path": [resource.schema_name, "public"],
+                        "search_path": [provider_schema, "public"],
                     },
-                    "table": resource.qualified_table_name,
+                    "table": provider_table,
                     "id_field": resource.primary_key,
                     "geom_field": resource.geometry_field,
                 }
@@ -73,7 +88,7 @@ def sync_pygeoapi_settings():
     try:
         catalog_resources = build_pygeoapi_resources_from_catalog()
     except (OperationalError, ProgrammingError):
-        return
+        return False
 
     base_resources = {
         key: value
@@ -86,3 +101,4 @@ def sync_pygeoapi_settings():
     base_resources.update(catalog_resources)
     settings.PYGEOAPI_CONFIG["resources"] = base_resources
     settings.OPENAPI_DOCUMENT = get_oas(settings.PYGEOAPI_CONFIG)
+    return True

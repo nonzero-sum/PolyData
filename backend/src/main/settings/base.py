@@ -58,6 +58,26 @@ def _env_bbox(name, default=None):
 def _module_available(module_name):
     return importlib.util.find_spec(module_name) is not None
 
+
+def _normalize_url_path(value, default="/"):
+    normalized_value = (value or "").strip()
+    if not normalized_value:
+        normalized_value = default
+
+    stripped_value = normalized_value.strip("/")
+    if not stripped_value:
+        return "/"
+
+    return f"/{stripped_value}"
+
+
+def _join_base_url(base_url, path):
+    normalized_base_url = (base_url or "").strip().rstrip("/")
+    normalized_path = _normalize_url_path(path, default="/")
+    if normalized_path == "/":
+        return normalized_base_url or "/"
+    return f"{normalized_base_url}{normalized_path}"
+
 ######################################################################
 # General
 ######################################################################
@@ -170,6 +190,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "catalog.middleware.PygeoapiBootstrapMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -269,14 +290,27 @@ WAGTAILDOCS_DOCUMENT_FORM_BASE = "catalog.forms.CatalogDocumentForm"
 # PygeoAPI
 ######################################################################
 
+
+def _split_schema_qualified_table_name(table_name, default_schema=None):
+    normalized_table_name = (table_name or "").strip()
+    normalized_default_schema = (default_schema or RESOURCE_DATA_SCHEMA).strip() or RESOURCE_DATA_SCHEMA
+
+    if "." not in normalized_table_name:
+        return normalized_default_schema, normalized_table_name
+
+    schema_name, unqualified_table_name = normalized_table_name.split(".", 1)
+    return schema_name.strip() or normalized_default_schema, unqualified_table_name.strip()
+
 def _build_pygeoapi_resources():
     table_name = os.environ.get("PYGEOAPI_TABLE", "").strip()
     if not table_name:
         return {}
 
+    table_schema, provider_table_name = _split_schema_qualified_table_name(table_name)
+
     collection_name = os.environ.get("PYGEOAPI_COLLECTION_NAME", "").strip()
     if not collection_name:
-        collection_name = table_name.split(".")[-1]
+        collection_name = provider_table_name
 
     collection_title = os.environ.get(
         "PYGEOAPI_COLLECTION_TITLE", collection_name.replace("_", " ").title()
@@ -295,12 +329,12 @@ def _build_pygeoapi_resources():
             "dbname": os.environ.get("DB_NAME") or os.environ.get("DB_DATABASE", "postgres"),
             "user": os.environ.get("DB_USER", "postgres"),
             "password": os.environ.get("DB_PASSWORD", ""),
-                    "search_path": _env_list(
-                        "PYGEOAPI_DB_SEARCH_PATH",
-                        default=[RESOURCE_DATA_SCHEMA, "public"],
-                    ),
+            "search_path": _env_list(
+                "PYGEOAPI_DB_SEARCH_PATH",
+                default=[table_schema, "public"],
+            ),
         },
-        "table": table_name,
+        "table": provider_table_name,
         "id_field": os.environ.get("PYGEOAPI_ID_FIELD", "id"),
         "geom_field": os.environ.get("PYGEOAPI_GEOM_FIELD", "geom"),
     }
@@ -347,7 +381,27 @@ def _build_pygeoapi_config():
     bind_host = os.environ.get("DJANGO_HOST", "").strip() or "0.0.0.0"
     bind_port = int(os.environ.get("DJANGO_PORT") or site_parts.port or 8000)
     service_name = os.environ.get("PYGEOAPI_TITLE", "PolyData GeoAPI").strip()
-    service_url = SITE_URL.rstrip("/") or "http://localhost:8000"
+    pygeoapi_base_path = _normalize_url_path(
+        os.environ.get("PYGEOAPI_BASE_PATH", "/geoapi"),
+        default="/geoapi",
+    )
+    service_url = (
+        os.environ.get("PYGEOAPI_URL", "").strip()
+        or _join_base_url(SITE_URL or "http://localhost:8000", pygeoapi_base_path)
+    )
+    map_url = os.environ.get(
+        "PYGEOAPI_MAP_URL",
+        "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    ).strip()
+    map_attribution = os.environ.get(
+        "PYGEOAPI_MAP_ATTRIBUTION",
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    ).strip()
+    default_items_limit = max(int(os.environ.get("PYGEOAPI_DEFAULT_ITEMS", "10")), 1)
+    max_items_limit = max(
+        int(os.environ.get("PYGEOAPI_MAX_ITEMS", str(default_items_limit))),
+        default_items_limit,
+    )
 
     return {
         "server": {
@@ -363,6 +417,14 @@ def _build_pygeoapi_config():
             "cors": _env_bool("PYGEOAPI_CORS", default=False),
             "pretty_print": _env_bool("PYGEOAPI_PRETTY_PRINT", default=DEBUG),
             "admin": _env_bool("PYGEOAPI_ADMIN", default=False),
+            "map": {
+                "url": map_url,
+                "attribution": map_attribution,
+            },
+            "limits": {
+                "default_items": default_items_limit,
+                "max_items": max_items_limit,
+            },
         },
         "logging": {
             "level": os.environ.get(
