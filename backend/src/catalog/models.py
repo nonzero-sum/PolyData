@@ -1,5 +1,7 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils.html import escape, format_html, format_html_join
 from django.utils.text import slugify
 from wagtail.admin.panels import FieldPanel, HelpPanel, InlinePanel, MultiFieldPanel
 from wagtail.log_actions import registry as log_action_registry
@@ -48,6 +50,46 @@ def _display_user(user):
             return str(username)
 
     return str(user)
+
+
+def _default_resource_data_schema():
+    return getattr(settings, "RESOURCE_DATA_SCHEMA", "resource_data")
+
+
+class DerivedTablesPanel(HelpPanel):
+    class BoundPanel(HelpPanel.BoundPanel):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.content = self._build_content()
+
+        def _build_content(self):
+            if not getattr(self.instance, "pk", None):
+                return "Derived tables will appear here after ingestion."
+
+            tables = list(self.instance.tables.order_by("-is_primary", "layer_name", "table_name"))
+            if not tables:
+                return "No derived tables generated yet."
+
+            rows = []
+            for table in tables:
+                primary_label = " (primary)" if table.is_primary else ""
+                geometry = table.geometry_field or "none"
+                ogc_api = "yes" if table.ogc_api_enabled else "no"
+                rows.append(
+                    (
+                        f"{escape(table.qualified_table_name)}{primary_label}",
+                        f"rows: {table.row_count} | geometry: {escape(geometry)} | ogc api: {ogc_api}",
+                    )
+                )
+
+            return format_html(
+                "<ul>{}</ul>",
+                format_html_join(
+                    "",
+                    "<li><strong>{}</strong><br>{}</li>",
+                    rows,
+                ),
+            )
 
 
 @register_snippet
@@ -345,10 +387,7 @@ class Resource(ClusterableModel):
             heading="Processing",
         ),
         InlinePanel("file_items", label="File", heading="File Source", max_num=1),
-        HelpPanel(
-            "Derived tables are generated and managed automatically by the ingestion pipeline.",
-            heading="Derived Tables",
-        ),
+        DerivedTablesPanel(heading="Derived Tables"),
         InlinePanel("api_items", label="API", heading="API Source", max_num=1),
     ]
 
@@ -509,7 +548,7 @@ class ResourceTable(models.Model):
         related_name="tables",
     )
     layer_name = models.CharField(max_length=255, blank=True)
-    schema_name = models.CharField(max_length=128, default="public")
+    schema_name = models.CharField(max_length=128, default=_default_resource_data_schema)
     table_name = models.CharField(max_length=255)
     primary_key = models.CharField(max_length=128, default="id")
     geometry_field = models.CharField(max_length=128, blank=True)
@@ -544,6 +583,11 @@ class ResourceTable(models.Model):
     def __str__(self):
         label = self.layer_name or self.table_name
         return f"{self.resource} / {label}"
+
+    def clean(self):
+        super().clean()
+        if not self.schema_name:
+            self.schema_name = _default_resource_data_schema()
 
     @property
     def qualified_table_name(self):

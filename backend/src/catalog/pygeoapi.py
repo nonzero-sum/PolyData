@@ -57,6 +57,7 @@ def build_pygeoapi_resources_from_catalog():
                         or os.environ.get("DB_DATABASE", "postgres"),
                         "user": os.environ.get("DB_USER", "postgres"),
                         "password": os.environ.get("DB_PASSWORD", ""),
+                        "search_path": [resource.schema_name, "public"],
                     },
                     "table": resource.qualified_table_name,
                     "id_field": resource.primary_key,

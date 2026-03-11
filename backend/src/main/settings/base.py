@@ -219,6 +219,8 @@ DATABASES = {
     }
 }
 
+RESOURCE_DATA_SCHEMA = os.environ.get("RESOURCE_DATA_SCHEMA", "resource_data").strip() or "resource_data"
+
 ######################################################################
 # Authentication
 ######################################################################
@@ -293,7 +295,10 @@ def _build_pygeoapi_resources():
             "dbname": os.environ.get("DB_NAME") or os.environ.get("DB_DATABASE", "postgres"),
             "user": os.environ.get("DB_USER", "postgres"),
             "password": os.environ.get("DB_PASSWORD", ""),
-            "search_path": _env_list("PYGEOAPI_DB_SEARCH_PATH", default=["public"]),
+                    "search_path": _env_list(
+                        "PYGEOAPI_DB_SEARCH_PATH",
+                        default=[RESOURCE_DATA_SCHEMA, "public"],
+                    ),
         },
         "table": table_name,
         "id_field": os.environ.get("PYGEOAPI_ID_FIELD", "id"),
