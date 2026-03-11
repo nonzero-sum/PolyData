@@ -2,13 +2,14 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.text import slugify
 from wagtail.admin.panels import FieldPanel, InlinePanel, MultiFieldPanel
+from wagtail.log_actions import registry as log_action_registry
 from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
 from wagtail.documents import get_document_model_string
 from wagtail.snippets.models import register_snippet
 
 from .file_formats import validate_allowed_upload
-from .metadata_schemas import apply_metadata_field_defaults, dublin_core_editor_fields, validate_metadata_payload
+from .metadata_schemas import DUBLIN_CORE_FIELDS, apply_metadata_field_defaults, dublin_core_editable_fields, metadata_editor_initial, validate_metadata_payload
 
 
 def _generate_unique_slug(model_class, source_value, instance_pk=None, parent_field=None):
@@ -28,6 +29,25 @@ def _generate_unique_slug(model_class, source_value, instance_pk=None, parent_fi
             return slug
         slug = f"{base_slug[:190]}-{counter}"
         counter += 1
+
+
+def _display_user(user):
+    if user is None:
+        return ""
+
+    full_name_getter = getattr(user, "get_full_name", None)
+    if callable(full_name_getter):
+        full_name = full_name_getter().strip()
+        if full_name:
+            return full_name
+
+    username_getter = getattr(user, "get_username", None)
+    if callable(username_getter):
+        username = username_getter()
+        if username:
+            return str(username)
+
+    return str(user)
 
 
 @register_snippet
@@ -139,7 +159,7 @@ class Dataset(ClusterableModel):
             heading="Metadata",
         ),
         MultiFieldPanel(
-            [FieldPanel(field_name) for field_name, _label in dublin_core_editor_fields()],
+            [FieldPanel(field_name) for field_name, _label in dublin_core_editable_fields()],
             heading="Dublin Core",
         ),
         InlinePanel("resources", label="Resource", heading="Resources"),
@@ -153,21 +173,109 @@ class Dataset(ClusterableModel):
 
     def dublin_core_defaults(self):
         return {
-            "title": self.title,
             "description": self.description,
+        }
+
+    def _creator_log_entry(self):
+        if not self.pk:
+            return None
+        return (
+            log_action_registry.get_logs_for_instance(self)
+            .filter(action="wagtail.create")
+            .select_related("user")
+            .order_by("timestamp", "id")
+            .first()
+        )
+
+    def creator_display(self, fallback_user=None):
+        creator_entry = self._creator_log_entry()
+        if creator_entry is not None:
+            return creator_entry.user_display_name
+        return _display_user(fallback_user)
+
+    def contributor_names(self):
+        contributors = []
+        seen = set()
+        for resource in self.resources.all():
+            creator_name = resource.creator_display()
+            if not creator_name or creator_name in seen:
+                continue
+            seen.add(creator_name)
+            contributors.append(creator_name)
+        return contributors
+
+    def dublin_core_managed_values(self, fallback_user=None):
+        return {
+            "title": self.title,
+            "creator": self.creator_display(fallback_user=fallback_user),
             "publisher": self.organization,
+            "contributor": ", ".join(self.contributor_names()),
+            "identifier": self.slug,
             "rights": self.license,
         }
 
+    def get_dublin_core(self, fallback_user=None):
+        metadata = metadata_editor_initial(self.metadata)
+        metadata["schema"] = "dublincore"
+        metadata = apply_metadata_field_defaults(metadata, self.dublin_core_defaults())
+        metadata["fields"].update(
+            {
+                field_name: "" if field_value in (None, "") else str(field_value)
+                for field_name, field_value in self.dublin_core_managed_values(
+                    fallback_user=fallback_user,
+                ).items()
+            }
+        )
+        return metadata
+
+    def set_dublin_core(self, value, fallback_user=None):
+        payload = metadata_editor_initial(value)
+        payload["schema"] = "dublincore"
+        payload = apply_metadata_field_defaults(payload, self.dublin_core_defaults())
+        payload["fields"].update(
+            {
+                field_name: "" if field_value in (None, "") else str(field_value)
+                for field_name, field_value in self.dublin_core_managed_values(
+                    fallback_user=fallback_user,
+                ).items()
+            }
+        )
+        self.metadata = payload
+
+    dublin_core = property(get_dublin_core, set_dublin_core)
+
+    def get_dublin_core_value(self, field_name):
+        return self.dublin_core.get("fields", {}).get(field_name, "")
+
+    def set_dublin_core_value(self, field_name, value):
+        payload = self.dublin_core
+        payload.setdefault("fields", {})[field_name] = value or ""
+        self.dublin_core = payload
+
     def clean(self):
         super().clean()
-        self.metadata = apply_metadata_field_defaults(self.metadata, self.dublin_core_defaults())
+        self.dublin_core = self.metadata
         validate_metadata_payload(self.metadata)
 
     def save(self, *args, **kwargs):
         if not self.slug:
             self.slug = _generate_unique_slug(Dataset, self.title, self.pk)
+        self.dublin_core = self.metadata
         super().save(*args, **kwargs)
+
+
+def _build_dublin_core_property(field_name):
+    def getter(self):
+        return self.get_dublin_core_value(field_name)
+
+    def setter(self, value):
+        self.set_dublin_core_value(field_name, value)
+
+    return property(getter, setter)
+
+
+for _field_name in DUBLIN_CORE_FIELDS:
+    setattr(Dataset, f"dc_{_field_name}", _build_dublin_core_property(_field_name))
 
 
 class Resource(ClusterableModel):
@@ -286,6 +394,28 @@ class Resource(ClusterableModel):
     @property
     def api_representation(self):
         return self.api_items.first()
+
+    def _creator_log_entry(self):
+        if not self.pk:
+            return None
+        return (
+            log_action_registry.get_logs_for_instance(self)
+            .filter(action="wagtail.create")
+            .select_related("user")
+            .order_by("timestamp", "id")
+            .first()
+        )
+
+    def creator_display(self, fallback_user=None):
+        stored_creator = (self.metadata or {}).get("created_by_display", "")
+        if stored_creator:
+            return stored_creator
+
+        creator_entry = self._creator_log_entry()
+        if creator_entry is not None:
+            return creator_entry.user_display_name
+
+        return _display_user(fallback_user)
 
     def clean(self):
         super().clean()

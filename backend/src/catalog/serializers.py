@@ -151,6 +151,7 @@ class ResourceSerializer(serializers.ModelSerializer):
 
 class DatasetSerializer(serializers.ModelSerializer):
     resources = ResourceSerializer(many=True, read_only=True)
+    dublin_core = serializers.SerializerMethodField()
     organization = OrganizationSerializer(read_only=True)
     license = LicenseTypeSerializer(read_only=True)
     organization_id = serializers.PrimaryKeyRelatedField(
@@ -175,6 +176,7 @@ class DatasetSerializer(serializers.ModelSerializer):
             "title",
             "slug",
             "description",
+            "dublin_core",
             "metadata",
             "license",
             "update_frequency",
@@ -187,6 +189,9 @@ class DatasetSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["slug", "created_at", "updated_at"]
+
+    def get_dublin_core(self, obj):
+        return obj.dublin_core
 
     def validate_metadata(self, value):
         validate_metadata_payload(value)

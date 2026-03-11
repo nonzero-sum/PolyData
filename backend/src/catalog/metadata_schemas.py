@@ -19,6 +19,15 @@ DUBLIN_CORE_FIELDS = (
     "rights",
 )
 
+DUBLIN_CORE_MANAGED_FIELDS = (
+    "title",
+    "creator",
+    "publisher",
+    "contributor",
+    "identifier",
+    "rights",
+)
+
 DUBLIN_CORE_FIELD_LABELS = {
     "title": "Title",
     "creator": "Creator",
@@ -137,3 +146,11 @@ def validate_metadata_payload(metadata, field_name="metadata"):
 
 def dublin_core_editor_fields(prefix="dc_"):
     return [(f"{prefix}{field_name}", DUBLIN_CORE_FIELD_LABELS[field_name]) for field_name in DUBLIN_CORE_FIELDS]
+
+
+def dublin_core_editable_fields(prefix="dc_"):
+    return [
+        (f"{prefix}{field_name}", DUBLIN_CORE_FIELD_LABELS[field_name])
+        for field_name in DUBLIN_CORE_FIELDS
+        if field_name not in DUBLIN_CORE_MANAGED_FIELDS
+    ]

@@ -6,7 +6,7 @@ from wagtail.admin.forms.models import WagtailAdminModelForm
 from wagtail.documents.forms import BaseDocumentForm
 
 from .file_formats import allowed_upload_extensions_accept, validate_allowed_upload
-from .metadata_schemas import apply_metadata_field_defaults, dublin_core_editor_fields, metadata_editor_initial, supported_metadata_schemas_display
+from .metadata_schemas import dublin_core_editable_fields, supported_metadata_schemas_display
 from .models import Dataset, Resource
 
 
@@ -43,29 +43,15 @@ class DatasetForm(WagtailAdminModelForm):
             "metadata": forms.HiddenInput(),
         }
 
-    dc_title = forms.CharField(required=False, label="Title")
-    dc_creator = forms.CharField(required=False, label="Creator")
     dc_subject = forms.CharField(required=False, label="Subject")
     dc_description = forms.CharField(required=False, label="Description", widget=forms.Textarea(attrs={"rows": 3}))
-    dc_publisher = forms.CharField(required=False, label="Publisher")
-    dc_contributor = forms.CharField(required=False, label="Contributor")
     dc_date = forms.CharField(required=False, label="Date")
     dc_type = forms.CharField(required=False, label="Type")
     dc_format = forms.CharField(required=False, label="Format")
-    dc_identifier = forms.CharField(required=False, label="Identifier")
     dc_source = forms.CharField(required=False, label="Source")
     dc_language = forms.CharField(required=False, label="Language")
     dc_relation = forms.CharField(required=False, label="Relation")
     dc_coverage = forms.CharField(required=False, label="Coverage")
-    dc_rights = forms.CharField(required=False, label="Rights", widget=forms.Textarea(attrs={"rows": 3}))
-
-    def _cleaned_dataset_defaults(self, cleaned_data):
-        return {
-            "title": cleaned_data.get("title") or "",
-            "description": cleaned_data.get("description") or "",
-            "publisher": cleaned_data.get("organization") or "",
-            "rights": cleaned_data.get("license") or "",
-        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -74,10 +60,7 @@ class DatasetForm(WagtailAdminModelForm):
         if metadata_field is None:
             return
 
-        metadata_initial = apply_metadata_field_defaults(
-            getattr(self.instance, "metadata", None),
-            self.instance.dublin_core_defaults(),
-        )
+        metadata_initial = self.instance.get_dublin_core(fallback_user=self.for_user)
         metadata_field.initial = metadata_initial
         metadata_field.help_text = (
             "Editorial metadata for the dataset. "
@@ -90,23 +73,29 @@ class DatasetForm(WagtailAdminModelForm):
         )
 
         metadata_fields = metadata_initial.get("fields", {})
-        for field_name, _label in dublin_core_editor_fields():
+        for field_name, _label in dublin_core_editable_fields():
             metadata_key = field_name.removeprefix("dc_")
             if field_name in self.fields:
                 self.fields[field_name].initial = metadata_fields.get(metadata_key, "")
 
     def clean(self):
         cleaned_data = super().clean()
-        metadata = metadata_editor_initial(cleaned_data.get("metadata"))
-        metadata["schema"] = "dublincore"
-        metadata["fields"] = {
-            field_name.removeprefix("dc_"): cleaned_data.get(field_name, "") or ""
-            for field_name, _label in dublin_core_editor_fields()
-        }
-        cleaned_data["metadata"] = apply_metadata_field_defaults(
-            metadata,
-            self._cleaned_dataset_defaults(cleaned_data),
+        self.instance.title = cleaned_data.get("title") or ""
+        self.instance.slug = cleaned_data.get("slug") or ""
+        self.instance.description = cleaned_data.get("description") or ""
+        self.instance.organization = cleaned_data.get("organization")
+        self.instance.license = cleaned_data.get("license")
+        self.instance.set_dublin_core(
+            {
+                "schema": "dublincore",
+                "fields": {
+                    field_name.removeprefix("dc_"): cleaned_data.get(field_name, "") or ""
+                    for field_name, _label in dublin_core_editable_fields()
+                },
+            },
+            fallback_user=self.for_user,
         )
+        cleaned_data["metadata"] = self.instance.metadata
         return cleaned_data
 
 
@@ -152,3 +141,11 @@ class ResourceForm(WagtailAdminModelForm):
             storage_field.help_text = (
                 "Only tabular and spatial resources can use Default + Postgres."
             )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        metadata = dict(cleaned_data.get("metadata") or {})
+        if not metadata.get("created_by_display") and self.for_user is not None:
+            metadata["created_by_display"] = self.instance.creator_display(fallback_user=self.for_user)
+        cleaned_data["metadata"] = metadata
+        return cleaned_data
