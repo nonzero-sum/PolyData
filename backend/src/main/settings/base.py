@@ -1,24 +1,18 @@
-from os import environ
+import importlib.util
+import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from django.core.management.utils import get_random_secret_key
 from django.urls import reverse_lazy
 from django.utils.csp import CSP
 from django.utils.translation import gettext_lazy as _
+from pygeoapi.openapi import get_oas
+from pygeoapi.util import get_api_rules
 
 ######################################################################
-# General
+# Utils
 ######################################################################
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-SECRET_KEY = environ.get("SECRET_KEY", get_random_secret_key())
-
-DEBUG = str(environ.get("DEBUG", "true")).lower() in ("1", "true", "yes", "on")
-
-SITE_URL = environ.get("DJANGO_URL", "http://localhost").strip()
-FRONTEND_URL = environ.get("FRONTEND_URL", "http://localhost").strip()
-
 
 def _clean_host(value):
     if not value:
@@ -31,12 +25,58 @@ def _clean_host(value):
     return host
 
 
+def _env_bool(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return str(value).lower() in ("1", "true", "yes", "on")
+
+
+def _env_list(name, default=None):
+    value = os.environ.get(name, "")
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    return items or (default or [])
+
+
+def _env_bbox(name, default=None):
+    default = default or [-180.0, -90.0, 180.0, 90.0]
+    raw_value = os.environ.get(name, "").strip()
+    if not raw_value:
+        return default
+
+    try:
+        values = [float(item.strip()) for item in raw_value.split(",")]
+    except ValueError:
+        return default
+
+    if len(values) not in (4, 6):
+        return default
+
+    return values
+
+
+def _module_available(module_name):
+    return importlib.util.find_spec(module_name) is not None
+
+######################################################################
+# General
+######################################################################
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+SECRET_KEY = os.environ.get("SECRET_KEY", get_random_secret_key())
+
+DEBUG = str(os.environ.get("DEBUG", "true")).lower() in ("1", "true", "yes", "on")
+
+SITE_URL = os.environ.get("DJANGO_URL", "http://localhost").strip()
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost").strip()
+
 ALLOWED_HOSTS = [
     host
     for host in [
         _clean_host(SITE_URL),
         _clean_host(FRONTEND_URL),
-        *[_clean_host(host) for host in environ.get("ALLOWED_HOSTS", "").split(",")],
+        *[_clean_host(host) for host in os.environ.get("ALLOWED_HOSTS", "").split(",")],
     ]
     if host
 ]
@@ -48,7 +88,7 @@ CSRF_TRUSTED_ORIGINS = [
         FRONTEND_URL.strip().rstrip("/"),
         *[
             origin.strip().rstrip("/")
-            for origin in environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
+            for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
         ],
     ]
     if origin
@@ -73,6 +113,22 @@ SECURE_CSP = {
 # Apps
 ######################################################################
 INSTALLED_APPS = [
+    # Wagtail CMS (must come before django.contrib.admin)
+    "wagtail.contrib.forms",
+    "wagtail.contrib.redirects",
+    "wagtail.contrib.routable_page",
+    "wagtail.embeds",
+    "wagtail.sites",
+    "wagtail.users",
+    "wagtail.snippets",
+    "wagtail.documents",
+    "wagtail.images",
+    "wagtail.search",  # core search backend
+    "wagtail.admin",
+    "wagtail",
+    # extras needed by Wagtail
+    "taggit",
+    "django.contrib.postgres",
     # Unfold Admin
     "unfold",  # before django.contrib.admin
     "unfold.contrib.filters",  # optional, if special filters are needed
@@ -91,6 +147,8 @@ INSTALLED_APPS = [
     # DRF
     "rest_framework",
     "drf_spectacular",
+    # Pygeoapi
+    "pygeoapi",
     # Auth
     "account",
     "oidc_provider",
@@ -140,17 +198,18 @@ TEMPLATES = [
 # Database
 ######################################################################
 
-GDAL_LIBRARY_PATH = environ.get("GDAL_LIBRARY_PATH", "/usr/lib/libgdal.so")
-GEOS_LIBRARY_PATH = environ.get("GEOS_LIBRARY_PATH", "/usr/lib/libgeos_c.so")
+GDAL_LIBRARY_PATH = os.environ.get("GDAL_LIBRARY_PATH", "/usr/lib/libgdal.so")
+GEOS_LIBRARY_PATH = os.environ.get("GEOS_LIBRARY_PATH", "/usr/lib/libgeos_c.so")
 
 DATABASES = {
     "default": {
         "ENGINE": "django.contrib.gis.db.backends.postgis",
-        "USER": environ.get("DB_USER"),
-        "PASSWORD": environ.get("DB_PASSWORD"),
-        "NAME": environ.get("DB_NAME"),
-        "HOST": environ.get("DB_HOST"),
-        "PORT": environ.get("DB_PORT"),
+        "USER": os.environ.get("DB_USER"),
+        "PASSWORD": os.environ.get("DB_PASSWORD"),
+        # support either DB_NAME or DB_DATABASE for compatibility with .env
+    "NAME": os.environ.get("DB_NAME") or os.environ.get("DB_DATABASE"),
+        "HOST": os.environ.get("DB_HOST"),
+        "PORT": os.environ.get("DB_PORT"),
         "TEST": {
             "NAME": "test",
         },
@@ -193,6 +252,161 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 
 USE_TZ = True
+
+######################################################################
+# Wagtail
+######################################################################
+WAGTAIL_SITE_NAME = "PolyData Portal"
+WAGTAILADMIN_BASE_URL = SITE_URL
+
+######################################################################
+# PygeoAPI
+######################################################################
+
+def _build_pygeoapi_resources():
+    table_name = os.environ.get("PYGEOAPI_TABLE", "").strip()
+    if not table_name:
+        return {}
+
+    collection_name = os.environ.get("PYGEOAPI_COLLECTION_NAME", "").strip()
+    if not collection_name:
+        collection_name = table_name.split(".")[-1]
+
+    collection_title = os.environ.get(
+        "PYGEOAPI_COLLECTION_TITLE", collection_name.replace("_", " ").title()
+    ).strip()
+    collection_description = os.environ.get(
+        "PYGEOAPI_COLLECTION_DESCRIPTION",
+        f"Features from the {table_name} PostGIS table.",
+    ).strip()
+
+    provider = {
+        "type": "feature",
+        "name": "PostgreSQL",
+        "data": {
+            "host": os.environ.get("DB_HOST", "127.0.0.1"),
+            "port": os.environ.get("DB_PORT", "5432"),
+            "dbname": os.environ.get("DB_NAME") or os.environ.get("DB_DATABASE", "postgres"),
+            "user": os.environ.get("DB_USER", "postgres"),
+            "password": os.environ.get("DB_PASSWORD", ""),
+            "search_path": _env_list("PYGEOAPI_DB_SEARCH_PATH", default=["public"]),
+        },
+        "table": table_name,
+        "id_field": os.environ.get("PYGEOAPI_ID_FIELD", "id"),
+        "geom_field": os.environ.get("PYGEOAPI_GEOM_FIELD", "geom"),
+    }
+
+    time_field = os.environ.get("PYGEOAPI_TIME_FIELD", "").strip()
+    title_field = os.environ.get("PYGEOAPI_TITLE_FIELD", "").strip()
+    resource_crs = _env_list(
+        "PYGEOAPI_CRS",
+        default=["http://www.opengis.net/def/crs/OGC/1.3/CRS84"],
+    )
+    storage_crs = os.environ.get(
+        "PYGEOAPI_STORAGE_CRS", "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+    ).strip()
+
+    if time_field:
+        provider["time_field"] = time_field
+    if title_field:
+        provider["title_field"] = title_field
+    if resource_crs:
+        provider["crs"] = resource_crs
+        provider["storage_crs"] = storage_crs or resource_crs[0]
+
+    resource = {
+        "type": "collection",
+        "title": collection_title,
+        "description": collection_description,
+        "keywords": _env_list(
+            "PYGEOAPI_COLLECTION_KEYWORDS", default=["postgis", "polydata"]
+        ),
+        "extents": {
+            "spatial": {
+                "bbox": _env_bbox("PYGEOAPI_COLLECTION_BBOX"),
+                "crs": resource_crs[0],
+            }
+        },
+        "providers": [provider],
+    }
+
+    return {collection_name: resource}
+
+
+def _build_pygeoapi_config():
+    site_parts = urlsplit(SITE_URL if "://" in SITE_URL else f"http://{SITE_URL}")
+    bind_host = os.environ.get("DJANGO_HOST", "").strip() or "0.0.0.0"
+    bind_port = int(os.environ.get("DJANGO_PORT") or site_parts.port or 8000)
+    service_name = os.environ.get("PYGEOAPI_TITLE", "PolyData GeoAPI").strip()
+    service_url = SITE_URL.rstrip("/") or "http://localhost:8000"
+
+    return {
+        "server": {
+            "bind": {
+                "host": bind_host,
+                "port": bind_port,
+            },
+            "url": f"{service_url}/",
+            "mimetype": "application/json; charset=UTF-8",
+            "encoding": "utf-8",
+            "language": "en-US",
+            "gzip": _env_bool("PYGEOAPI_GZIP", default=False),
+            "cors": _env_bool("PYGEOAPI_CORS", default=False),
+            "pretty_print": _env_bool("PYGEOAPI_PRETTY_PRINT", default=DEBUG),
+            "admin": _env_bool("PYGEOAPI_ADMIN", default=False),
+        },
+        "logging": {
+            "level": os.environ.get(
+                "PYGEOAPI_LOG_LEVEL", "DEBUG" if DEBUG else "ERROR"
+            )
+        },
+        "metadata": {
+            "identification": {
+                "title": service_name,
+                "description": os.environ.get(
+                    "PYGEOAPI_DESCRIPTION",
+                    "OGC API endpoint for PolyData geospatial resources.",
+                ),
+                "keywords": _env_list(
+                    "PYGEOAPI_KEYWORDS", default=["geospatial", "api", "polydata"]
+                ),
+                "keywords_type": os.environ.get(
+                    "PYGEOAPI_KEYWORDS_TYPE", "theme"
+                ),
+                "terms_of_service": os.environ.get(
+                    "PYGEOAPI_TERMS_OF_SERVICE", service_url
+                ),
+                "url": os.environ.get("PYGEOAPI_METADATA_URL", service_url),
+            },
+            "license": {
+                "name": os.environ.get("PYGEOAPI_LICENSE_NAME", "Proprietary"),
+                "url": os.environ.get("PYGEOAPI_LICENSE_URL", service_url),
+            },
+            "provider": {
+                "name": os.environ.get("PYGEOAPI_PROVIDER_NAME", "PolyData"),
+                "url": os.environ.get("PYGEOAPI_PROVIDER_URL", service_url),
+            },
+            "contact": {
+                "name": os.environ.get("PYGEOAPI_CONTACT_NAME", "PolyData Admin"),
+                "email": os.environ.get(
+                    "PYGEOAPI_CONTACT_EMAIL",
+                    os.environ.get("DJANGO_SUPERUSER_EMAIL", "admin@polydata.com"),
+                ),
+                "role": os.environ.get("PYGEOAPI_CONTACT_ROLE", "pointOfContact"),
+            },
+        },
+        "resources": _build_pygeoapi_resources(),
+    }
+
+PYGEOAPI_CONFIG = _build_pygeoapi_config()
+API_RULES = get_api_rules(PYGEOAPI_CONFIG)
+OPENAPI_DOCUMENT = get_oas(PYGEOAPI_CONFIG)
+APPEND_SLASH = not API_RULES.strict_slashes
+
+if PYGEOAPI_CONFIG["server"].get("cors", False) and _module_available("corsheaders"):
+    INSTALLED_APPS.append("corsheaders")
+    MIDDLEWARE.insert(0, "corsheaders.middleware.CorsMiddleware")
+    CORS_ORIGIN_ALLOW_ALL = True
 
 ######################################################################
 # Staticfiles
@@ -285,3 +499,4 @@ if DEBUG:
     print(f"STATIC_ROOT: {STATIC_ROOT}")
     print(f"STATIC_URL: {STATIC_URL}")
     print(f"MEDIA_ROOT: {MEDIA_ROOT}")
+    print(f"PYGEOAPI_CONFIG: {PYGEOAPI_CONFIG}")
