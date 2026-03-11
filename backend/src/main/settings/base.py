@@ -149,6 +149,8 @@ INSTALLED_APPS = [
     "drf_spectacular",
     # Pygeoapi
     "pygeoapi",
+    # Catalog
+    "catalog",
     # Auth
     "account",
     "oidc_provider",
@@ -173,6 +175,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "wagtail.contrib.redirects.middleware.RedirectMiddleware",
 ]
 
 ######################################################################
@@ -258,6 +261,7 @@ USE_TZ = True
 ######################################################################
 WAGTAIL_SITE_NAME = "PolyData Portal"
 WAGTAILADMIN_BASE_URL = SITE_URL
+WAGTAILDOCS_DOCUMENT_FORM_BASE = "catalog.forms.CatalogDocumentForm"
 
 ######################################################################
 # PygeoAPI

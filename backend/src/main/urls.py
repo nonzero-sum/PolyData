@@ -9,7 +9,7 @@ from drf_spectacular.views import (
 # wagtail
 from wagtail import urls as wagtail_urls
 from wagtail.admin import urls as wagtailadmin_urls
-from wagtail.contrib.redirects import urls as wagtailredirect_urls
+from wagtail.documents import urls as wagtaildocs_urls
 
 # pygeoapi integration
 from pygeoapi.django_ import urls as pygeoapi_urls
@@ -31,8 +31,8 @@ urlpatterns = [
     path("account/", include("account.urls")),
     # pygeoapi endpoint
     path("geoapi/", include(pygeoapi_urls)),
-    # wagtail redirects (must be before wagtail_urls)
-    path("", include(wagtailredirect_urls)),
+    # wagtail document serving
+    path("documents/", include(wagtaildocs_urls)),
     # wagtail admin and site
     path("dms/", include(wagtailadmin_urls)),
     path("", include(wagtail_urls)),
