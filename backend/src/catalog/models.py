@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.text import slugify
-from wagtail.admin.panels import FieldPanel, InlinePanel, MultiFieldPanel
+from wagtail.admin.panels import FieldPanel, HelpPanel, InlinePanel, MultiFieldPanel
 from wagtail.log_actions import registry as log_action_registry
 from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
@@ -345,7 +345,10 @@ class Resource(ClusterableModel):
             heading="Processing",
         ),
         InlinePanel("file_items", label="File", heading="File Source", max_num=1),
-        InlinePanel("tables", label="Table", heading="Derived Tables"),
+        HelpPanel(
+            "Derived tables are generated and managed automatically by the ingestion pipeline.",
+            heading="Derived Tables",
+        ),
         InlinePanel("api_items", label="API", heading="API Source", max_num=1),
     ]
 
