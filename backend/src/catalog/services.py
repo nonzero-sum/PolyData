@@ -3,6 +3,7 @@ import io
 import json
 import mimetypes
 import re
+import sqlite3
 import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
@@ -348,12 +349,20 @@ def _csv_has_coordinate_columns(file_representation):
 
 
 def _build_ingested_table_name(resource):
+    return _build_layer_table_name(resource)
+
+
+def _build_layer_table_name(resource, layer_name=None):
     base_name = slugify(
-        f"{resource.dataset.slug}_{resource.slug}",
+        "_".join(
+            part
+            for part in [resource.dataset.slug, resource.slug, layer_name]
+            if part
+        ),
         allow_unicode=False,
     ).replace("-", "_") or f"resource_{resource.pk}"
     digest = hashlib.sha1(
-        f"{resource.dataset_id}:{resource.slug}".encode("utf-8"),
+        f"{resource.dataset_id}:{resource.slug}:{layer_name or ''}".encode("utf-8"),
         usedforsecurity=False,
     ).hexdigest()[:8]
     prefix = base_name[: IDENTIFIER_MAX_LENGTH - len(digest) - 1]
@@ -524,6 +533,13 @@ def _sync_tabular_resource_table(resource, schema_name, table_name, row_count):
         if previous_location != (schema_name, table_name):
             _drop_table_if_needed(*previous_location)
 
+    _delete_stale_resource_tables(resource, {table_name})
+
+
+def _delete_stale_resource_tables(resource, keep_table_names):
+    for resource_table in resource.tables.exclude(table_name__in=keep_table_names):
+        resource_table.delete()
+
 
 def _sync_spatial_resource_table(
     resource,
@@ -562,6 +578,50 @@ def _sync_spatial_resource_table(
         ResourceTable.objects.filter(pk=existing.pk).update(**updates)
         if previous_location != (schema_name, table_name):
             _drop_table_if_needed(*previous_location)
+
+    _delete_stale_resource_tables(resource, {table_name})
+
+
+def _sync_spatial_resource_tables(resource, schema_name, table_definitions):
+    existing_tables = {
+        resource_table.table_name: resource_table
+        for resource_table in resource.tables.order_by("id")
+    }
+    desired_table_names = {table_definition["table_name"] for table_definition in table_definitions}
+    new_resource_tables = []
+
+    for table_definition in table_definitions:
+        table_name = table_definition["table_name"]
+        existing = existing_tables.get(table_name)
+        expected_values = {
+            "layer_name": table_definition["layer_name"],
+            "schema_name": schema_name,
+            "table_name": table_name,
+            "primary_key": "id",
+            "geometry_field": table_definition["geometry_field"],
+            "srid": table_definition["srid"],
+            "row_count": table_definition["row_count"],
+            "bbox": table_definition["bbox"],
+            "ogc_api_enabled": bool(table_definition["geometry_field"]),
+            "is_primary": table_definition["is_primary"],
+        }
+
+        if existing is None:
+            new_resource_tables.append(ResourceTable(resource=resource, **expected_values))
+            continue
+
+        updates = {
+            field_name: value
+            for field_name, value in expected_values.items()
+            if getattr(existing, field_name) != value
+        }
+        if updates:
+            ResourceTable.objects.filter(pk=existing.pk).update(**updates)
+
+    if new_resource_tables:
+        ResourceTable.objects.bulk_create(new_resource_tables)
+
+    _delete_stale_resource_tables(resource, desired_table_names)
 
 
 def _ingest_csv_resource(resource, file_representation, metadata):
@@ -742,16 +802,35 @@ def _load_geojson_geodataframe(file_representation):
     if raw_content is None:
         raise ValueError("GeoJSON ingestion requires a readable source document.")
 
-    with tempfile.NamedTemporaryFile(suffix=".geojson") as temp_file:
+    geodataframe = _read_vector_file_from_bytes(raw_content, ".geojson")
+    return _normalize_spatial_geodataframe(
+        geodataframe,
+        empty_message="GeoJSON file does not contain features.",
+        missing_geometry_message="GeoJSON file must include a geometry column.",
+    )
+
+
+def _read_vector_file_from_bytes(raw_content, suffix, layer_name=None):
+    with tempfile.NamedTemporaryFile(suffix=suffix) as temp_file:
         temp_file.write(raw_content)
         temp_file.flush()
-        geodataframe = gpd.read_file(temp_file.name)
+        read_kwargs = {}
+        if layer_name is not None:
+            read_kwargs["layer"] = layer_name
+        return gpd.read_file(temp_file.name, **read_kwargs)
 
+
+def _normalize_spatial_geodataframe(
+    geodataframe,
+    *,
+    empty_message,
+    missing_geometry_message,
+):
     if geodataframe.empty and len(geodataframe.columns) == 0:
-        raise ValueError("GeoJSON file does not contain features.")
+        raise ValueError(empty_message)
 
     if geodataframe.geometry is None or geodataframe.geometry.name not in geodataframe.columns:
-        raise ValueError("GeoJSON file must include a geometry column.")
+        raise ValueError(missing_geometry_message)
 
     if geodataframe.crs is None:
         geodataframe = geodataframe.set_crs(epsg=4326)
@@ -783,6 +862,57 @@ def _load_geojson_geodataframe(file_representation):
         name="id",
     )
     return normalized_geodataframe, column_mapping, normalized_geometry_column
+
+
+def _load_geopackage_geodataframes(file_representation):
+    raw_content = _read_document_bytes(file_representation)
+    if raw_content is None:
+        raise ValueError("GeoPackage ingestion requires a readable source document.")
+
+    with tempfile.NamedTemporaryFile(suffix=".gpkg") as temp_file:
+        temp_file.write(raw_content)
+        temp_file.flush()
+
+        with sqlite3.connect(temp_file.name) as sqlite_connection:
+            cursor = sqlite_connection.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    c.table_name,
+                    COALESCE(NULLIF(c.identifier, ''), c.table_name)
+                FROM gpkg_contents AS c
+                JOIN gpkg_geometry_columns AS g
+                    ON g.table_name = c.table_name
+                WHERE c.data_type = 'features'
+                ORDER BY c.table_name
+                """
+            )
+            layer_rows = cursor.fetchall()
+
+        if not layer_rows:
+            raise ValueError("GeoPackage file does not contain feature layers.")
+
+        layers = []
+        for source_layer_name, display_layer_name in layer_rows:
+            geodataframe = gpd.read_file(temp_file.name, layer=source_layer_name)
+            normalized_geodataframe, column_mapping, geometry_field = _normalize_spatial_geodataframe(
+                geodataframe,
+                empty_message=f"GeoPackage layer '{display_layer_name}' does not contain features.",
+                missing_geometry_message=(
+                    f"GeoPackage layer '{display_layer_name}' must include a geometry column."
+                ),
+            )
+            layers.append(
+                {
+                    "source_layer_name": source_layer_name,
+                    "display_layer_name": display_layer_name,
+                    "geodataframe": normalized_geodataframe,
+                    "column_mapping": column_mapping,
+                    "geometry_field": geometry_field,
+                }
+            )
+
+    return layers
 
 
 def _replace_spatial_table(schema_name, table_name, geodataframe, geometry_field):
@@ -855,6 +985,79 @@ def _ingest_geojson_resource(resource, file_representation, metadata):
     }
 
 
+def _ingest_geopackage_resource(resource, file_representation, metadata):
+    schema_name = ensure_resource_data_schema()
+    layers = _load_geopackage_geodataframes(file_representation)
+    ingested_layers = []
+
+    for index, layer in enumerate(layers):
+        geodataframe = layer["geodataframe"]
+        geometry_field = layer["geometry_field"]
+        table_name = _build_layer_table_name(resource, layer["source_layer_name"])
+        _replace_spatial_table(schema_name, table_name, geodataframe, geometry_field)
+
+        bbox = []
+        if not geodataframe.empty:
+            total_bounds = geodataframe.total_bounds.tolist()
+            if len(total_bounds) == 4:
+                bbox = [float(value) for value in total_bounds]
+
+        srid = geodataframe.crs.to_epsg() if geodataframe.crs is not None else 4326
+        if srid is None:
+            srid = 4326
+
+        ingested_layers.append(
+            {
+                "layer_name": layer["display_layer_name"],
+                "source_layer_name": layer["source_layer_name"],
+                "table_name": table_name,
+                "geometry_field": geometry_field,
+                "srid": srid,
+                "bbox": bbox,
+                "row_count": len(geodataframe.index),
+                "is_primary": index == 0,
+                "ingested_columns": list(geodataframe.columns),
+                "source_column_map": layer["column_mapping"],
+            }
+        )
+
+    _sync_spatial_resource_tables(resource, schema_name, ingested_layers)
+
+    primary_layer = ingested_layers[0]
+    metadata["target_schema"] = schema_name
+    metadata["target_table"] = primary_layer["table_name"]
+    metadata["target_tables"] = [layer["table_name"] for layer in ingested_layers]
+    metadata["target_layers"] = [
+        {
+            "source_layer_name": layer["source_layer_name"],
+            "display_layer_name": layer["layer_name"],
+            "target_table": layer["table_name"],
+            "geometry_field": layer["geometry_field"],
+            "srid": layer["srid"],
+            "bbox": layer["bbox"],
+            "row_count": layer["row_count"],
+            "ingested_columns": layer["ingested_columns"],
+            "source_column_map": layer["source_column_map"],
+            "is_primary": layer["is_primary"],
+        }
+        for layer in ingested_layers
+    ]
+    metadata["ingested_columns"] = primary_layer["ingested_columns"]
+    metadata["source_column_map"] = primary_layer["source_column_map"]
+    metadata["geometry_field"] = primary_layer["geometry_field"]
+    metadata["row_count"] = sum(layer["row_count"] for layer in ingested_layers)
+    metadata["bbox"] = primary_layer["bbox"]
+    metadata["srid"] = primary_layer["srid"]
+    metadata["layer_count"] = len(ingested_layers)
+
+    return {
+        "processing_status": Resource.ProcessingStatus.READY,
+        "processing_message": (
+            f"GeoPackage ingested into {schema_name} with {len(ingested_layers)} layer(s)."
+        ),
+    }
+
+
 def ensure_resource_data_schema():
     schema_name = (settings.RESOURCE_DATA_SCHEMA or "resource_data").strip() or "resource_data"
     quoted_schema_name = connection.ops.quote_name(schema_name)
@@ -913,9 +1116,13 @@ def process_resource(resource):
                 processing_overrides.update(
                     _ingest_geojson_resource(resource, file_representation, metadata)
                 )
+            elif _document_suffix(resource) == ".gpkg" and file_representation is not None:
+                processing_overrides.update(
+                    _ingest_geopackage_resource(resource, file_representation, metadata)
+                )
             else:
                 processing_overrides["processing_message"] = (
-                    "Spatial resource detected. Synchronous ingestion is currently implemented for CSV with lat/lon and GeoJSON files only."
+                    "Spatial resource detected. Synchronous ingestion is currently implemented for CSV with lat/lon, GeoJSON, and GeoPackage files only."
                 )
         elif detected_type == Resource.ResourceKind.API:
             metadata.setdefault("ingestion", "external")
