@@ -1,3 +1,4 @@
+from django.db.models import Prefetch
 from django.views.generic import DetailView, ListView, TemplateView
 
 from catalog.models import Dataset, DatasetTag, Organization, Resource
@@ -9,9 +10,9 @@ class HomeView(TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["dataset_count"] = Dataset.objects.count()
-        context["resource_count"] = Resource.objects.count()
-        context["organization_count"] = Organization.objects.count()
+        context["dataset_count"] = Dataset.objects.filter(resources__published=True).distinct().count()
+        context["resource_count"] = Resource.objects.filter(published=True).count()
+        context["organization_count"] = Organization.objects.filter(datasets__resources__published=True).distinct().count()
         context["search_query"] = (self.request.GET.get("search") or "").strip()
         return context
 
@@ -26,6 +27,7 @@ class DatasetListView(ListView):
         queryset = (
             Dataset.objects.select_related("organization", "license")
             .prefetch_related("tags")
+            .filter(resources__published=True)
             .order_by("title")
         )
         search = (self.request.GET.get("search") or "").strip()
@@ -40,7 +42,9 @@ class DatasetListView(ListView):
         context = super().get_context_data(**kwargs)
         context["search_query"] = (self.request.GET.get("search") or "").strip()
         context["selected_tag_slug"] = (self.request.GET.get("tag") or "").strip()
-        context["available_tags"] = DatasetTag.objects.order_by("name")
+        context["available_tags"] = DatasetTag.objects.filter(
+            tagged_items__content_object__resources__published=True
+        ).distinct().order_by("name")
         return context
 
 
@@ -52,10 +56,15 @@ class DatasetDetailView(DetailView):
     slug_url_kwarg = "slug"
 
     def get_queryset(self):
-        return Dataset.objects.select_related("organization", "license").prefetch_related(
-            "resources__file_items",
-            "resources__tables",
-            "resources__api_items",
+        return Dataset.objects.select_related("organization", "license").filter(resources__published=True).distinct().prefetch_related(
+            Prefetch(
+                "resources",
+                queryset=Resource.objects.filter(published=True).prefetch_related(
+                    "file_items",
+                    "tables",
+                    "api_items",
+                ),
+            ),
         )
 
 
@@ -69,6 +78,7 @@ class ResourceListView(ListView):
         queryset = (
             Resource.objects.select_related("dataset", "dataset__organization")
             .prefetch_related("file_items")
+            .filter(published=True)
             .order_by("title")
         )
         search = (self.request.GET.get("search") or "").strip()
@@ -99,7 +109,7 @@ class ResourceDetailView(DetailView):
             "file_items",
             "tables",
             "api_items",
-        ).filter(dataset__slug=self.kwargs["dataset_slug"])
+        ).filter(dataset__slug=self.kwargs["dataset_slug"], published=True)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -118,7 +128,7 @@ class OrganizationListView(ListView):
     paginate_by = 24
 
     def get_queryset(self):
-        queryset = Organization.objects.order_by("title")
+        queryset = Organization.objects.filter(datasets__resources__published=True).distinct().order_by("title")
         search = (self.request.GET.get("search") or "").strip()
         if search:
             queryset = queryset.filter(title__icontains=search)
@@ -138,4 +148,11 @@ class OrganizationDetailView(DetailView):
     slug_url_kwarg = "slug"
 
     def get_queryset(self):
-        return Organization.objects.prefetch_related("datasets__license", "datasets__resources")
+        return Organization.objects.filter(datasets__resources__published=True).distinct().prefetch_related(
+            Prefetch(
+                "datasets",
+                queryset=Dataset.objects.select_related("license").filter(resources__published=True).distinct().prefetch_related(
+                    Prefetch("resources", queryset=Resource.objects.filter(published=True))
+                ),
+            )
+        )
