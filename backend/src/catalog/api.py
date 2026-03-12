@@ -1,11 +1,12 @@
 from django.db.models import Prefetch
-from rest_framework import viewsets
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import filters, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import Dataset, Organization, Resource, ResourceTable
+from .models import Dataset, DatasetTag, Organization, Resource, ResourceTable
 from .serializers import (
     DatasetSerializer,
     OrganizationSerializer,
@@ -15,25 +16,32 @@ from .serializers import (
     ResourceTableSerializer,
 )
 from ingestion.services import fetch_resource_table_rows, get_primary_resource_table
+from .filters import DatasetFilter, OrganizationFilter, ResourceFilter
 
 
 class OrganizationViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Organization.objects.all().order_by("title")
     serializer_class = OrganizationSerializer
     permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_class = OrganizationFilter
+    search_fields = ["title", "description", "slug"]
+    ordering_fields = ["title", "slug"]
+    ordering = ["title"]
 
     def get_queryset(self):
-        queryset = super().get_queryset().filter(datasets__resources__published=True).distinct()
-        search = self.request.query_params.get("search", "").strip()
-        if search:
-            queryset = queryset.filter(title__icontains=search)
-        return queryset
+        return super().get_queryset().filter(datasets__resources__published=True).distinct()
 
 
 class DatasetViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Dataset.objects.select_related("organization", "license").all()
     serializer_class = DatasetSerializer
     permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_class = DatasetFilter
+    search_fields = ["title", "description", "slug", "organization__title"]
+    ordering_fields = ["title", "created_at", "updated_at", "update_frequency"]
+    ordering = ["title"]
 
     def get_queryset(self):
         queryset = super().get_queryset().filter(resources__published=True).distinct()
@@ -49,12 +57,6 @@ class DatasetViewSet(viewsets.ReadOnlyModelViewSet):
                 ),
             )
 
-        search = self.request.query_params.get("search", "").strip()
-        organization = self.request.query_params.get("organization", "").strip()
-        if search:
-            queryset = queryset.filter(title__icontains=search)
-        if organization:
-            queryset = queryset.filter(organization__slug__iexact=organization)
         return queryset
 
     def get_serializer_context(self):
@@ -62,6 +64,32 @@ class DatasetViewSet(viewsets.ReadOnlyModelViewSet):
         context["include_resources"] = self.action == "retrieve"
         context["public_only"] = True
         return context
+
+    @action(detail=False, methods=["get"], url_path="filter-options")
+    def filter_options(self, request):
+        organizations = Organization.objects.filter(
+            datasets__resources__published=True
+        ).distinct().order_by("title")
+        tags = DatasetTag.objects.filter(
+            tagged_items__content_object__resources__published=True
+        ).distinct().order_by("name")
+
+        return Response(
+            {
+                "organizations": [
+                    {"id": organization.id, "title": organization.title, "slug": organization.slug}
+                    for organization in organizations
+                ],
+                "tags": [
+                    {"id": tag.id, "name": tag.name, "slug": tag.slug}
+                    for tag in tags
+                ],
+                "update_frequencies": [
+                    {"value": value, "label": label}
+                    for value, label in Dataset.UpdateFrequency.choices
+                ],
+            }
+        )
 
     @action(detail=True, methods=["get"])
     def resources(self, request, pk=None):
@@ -91,21 +119,29 @@ class ResourceViewSet(viewsets.ReadOnlyModelViewSet):
     ).all()
     serializer_class = ResourceSerializer
     permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_class = ResourceFilter
+    search_fields = ["title", "description", "slug", "dataset__title"]
+    ordering_fields = ["title", "created_at", "updated_at", "processed_at"]
+    ordering = ["title"]
 
     def get_queryset(self):
-        queryset = super().get_queryset().filter(published=True)
-        dataset_id = self.request.query_params.get("dataset")
-        resource_type = self.request.query_params.get("type", "").strip()
-        geospatial = self.request.query_params.get("geospatial", "").strip().lower()
+        return super().get_queryset().filter(published=True)
 
-        if dataset_id:
-            queryset = queryset.filter(dataset_id=dataset_id)
-        if resource_type:
-            queryset = queryset.filter(resource_kind=resource_type)
-        if geospatial in {"1", "true", "yes"}:
-            queryset = queryset.filter(resource_kind=Resource.ResourceKind.SPATIAL)
-
-        return queryset
+    @action(detail=False, methods=["get"], url_path="filter-options")
+    def filter_options(self, request):
+        return Response(
+            {
+                "resource_kinds": [
+                    {"value": value, "label": label}
+                    for value, label in Resource.ResourceKind.choices
+                ],
+                "processing_statuses": [
+                    {"value": value, "label": label}
+                    for value, label in Resource.ProcessingStatus.choices
+                ],
+            }
+        )
 
     def _get_nested_table(self, resource, table_pk):
         try:
