@@ -54,6 +54,8 @@ class ResourceFileSerializer(serializers.ModelSerializer):
 class ResourceTableSerializer(serializers.ModelSerializer):
     collection_name = serializers.ReadOnlyField()
     qualified_table_name = serializers.ReadOnlyField()
+    table_url = serializers.SerializerMethodField()
+    rows_url = serializers.SerializerMethodField()
     ogc_collection_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -72,17 +74,33 @@ class ResourceTableSerializer(serializers.ModelSerializer):
             "ogc_api_enabled",
             "is_primary",
             "collection_name",
+            "table_url",
+            "rows_url",
             "ogc_collection_url",
         ]
+
+    def _build_absolute_or_relative_url(self, path):
+        request = self.context.get("request")
+        if request is None:
+            return path
+        return request.build_absolute_uri(path)
+
+    def get_table_url(self, obj):
+        return self._build_absolute_or_relative_url(
+            f"/api/resources/{obj.resource_id}/tables/{obj.pk}/"
+        )
+
+    def get_rows_url(self, obj):
+        return self._build_absolute_or_relative_url(
+            f"/api/resources/{obj.resource_id}/tables/{obj.pk}/rows/"
+        )
 
     def get_ogc_collection_url(self, obj):
         if not obj.ogc_api_enabled or not obj.geometry_field:
             return None
-        request = self.context.get("request")
-        path = f"/geoapi/collections/{obj.collection_name}"
-        if request is None:
-            return path
-        return request.build_absolute_uri(path)
+        return self._build_absolute_or_relative_url(
+            f"/geoapi/collections/{obj.collection_name}"
+        )
 
 
 class ResourceAPISerializer(serializers.ModelSerializer):

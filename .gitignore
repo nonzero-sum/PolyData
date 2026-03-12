@@ -26,3 +26,4 @@ next-env.d.ts
 django-liberty/.env
 django-liberty/.env.frontend
 backend/.env
+/backend/src/main/media

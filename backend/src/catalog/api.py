@@ -3,15 +3,28 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 
-from .models import Dataset, Resource, ResourceTable
+from .models import Dataset, Organization, Resource, ResourceTable
 from .serializers import (
     DatasetSerializer,
+    OrganizationSerializer,
     ResourceAPISerializer,
     ResourceFileSerializer,
     ResourceSerializer,
     ResourceTableSerializer,
 )
 from .services import fetch_resource_table_rows, get_primary_resource_table
+
+
+class OrganizationViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Organization.objects.all().order_by("title")
+    serializer_class = OrganizationSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        search = self.request.query_params.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(title__icontains=search)
+        return queryset
 
 
 class DatasetViewSet(viewsets.ModelViewSet):
