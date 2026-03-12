@@ -4,15 +4,17 @@ FROM oven/bun:latest AS builder
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
-COPY bun.lockb ./
+COPY src/package.json ./package.json
+COPY src/bun.lock ./bun.lock
 
 # Install dependencies
-RUN bun install
+RUN bun install --frozen-lockfile
 
 # Copy source code
-COPY /src ./src
-COPY nuxt.config.ts tsconfig.json ./
+COPY src/ ./
+
+# Ensure the image build does not reuse local Nuxt artifacts.
+RUN rm -rf .nuxt .output
 
 # Build the Nuxt application
 RUN bun run build
@@ -22,18 +24,16 @@ FROM oven/bun:latest
 
 WORKDIR /app
 
+# Runtime configuration
+ENV NITRO_HOST=0.0.0.0
+ENV NITRO_PORT=3000
+
 # Copy only necessary files from builder
-COPY --from=builder /app/.nuxt ./.nuxt
+COPY --from=builder /app/.output ./.output
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/bun.lockb ./
 
 # Expose port
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD bun run -e "require('http').get('http://localhost:3000', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
-
 # Start the application
-CMD ["bun", "run", ".nuxt/dist/server/server.mjs"]
+CMD ["bun", ".output/server/index.mjs"]

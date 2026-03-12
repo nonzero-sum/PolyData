@@ -1,0 +1,6 @@
+src/.nuxt
+src/.output
+src/node_modules
+src/.data
+src/.nitro
+src/.cache

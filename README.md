@@ -28,9 +28,11 @@ geospatial datasets. Its architecture combines a Django backend with:
 
 - Docker & Docker Compose
 - (Optional for local tasks) Python 3.14+
-- PostgreSQL with PostGIS extension (provided by the `db` container)
+- PostgreSQL with PostGIS extension (provided by the `database` container)
 
 ## Quickstart
+
+When running through Docker Compose, set the database host to the Compose service name `database`, not `localhost`.
 
 1. Clone the repository:
 
@@ -43,7 +45,7 @@ geospatial datasets. Its architecture combines a Django backend with:
 
    ```bash
    cp backend/.env.example backend/.env
-   # adjust DB_*, SECRET_KEY, DJANGO_URL, FRONTEND_URL, etc.
+   # adjust POSTGRES_*, SECRET_KEY, DJANGO_URL, FRONTEND_URL, etc.
    ```
 
 3. Bring up the services:
@@ -52,8 +54,13 @@ geospatial datasets. Its architecture combines a Django backend with:
    docker-compose up -d --build
    ```
 
-   This will start the `db` (PostGIS) and `backend` (Django/Gunicorn)
+   This will start the `database` (PostGIS) and `backend` (Django/Gunicorn)
    containers.
+
+   If you already have a local PostgreSQL volume created with the old
+   `/var/lib/postgresql/data` mount layout, do not reuse it directly with
+   PostgreSQL 18+ images. Remove the old development volume if it is
+   disposable, or migrate it with `pg_upgrade` before reattaching data.
 
 4. Create a Django superuser to access the admin:
 
@@ -98,7 +105,7 @@ docker-compose exec backend uv add <package>
 
 ## Important environment variables
 
-- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
+- `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
 - `SECRET_KEY`, `DEBUG`, `DJANGO_URL`, `FRONTEND_URL`
 - `PYGEOAPI_TABLE`, `PYGEOAPI_BASE_PATH`, `PYGEOAPI_TITLE`, etc.
 

@@ -40,7 +40,7 @@ function normalizeCount(payload) {
 }
 
 async function fetchCounts() {
-    const base = config.public.backendUrl || 'http://localhost:8000'
+    const base = config.public.backendUrl || 'http://127.0.0.1:8000'
     const [datasetsResponse, resourcesResponse, organizationsResponse] = await Promise.allSettled([
         fetch(`${base}/api/datasets/`),
         fetch(`${base}/api/resources/`),
