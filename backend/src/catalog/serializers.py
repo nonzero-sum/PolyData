@@ -82,10 +82,11 @@ class ResourceFileSerializer(serializers.ModelSerializer):
     def get_download_url(self, obj):
         if not obj.document or not obj.document.file:
             return None
+        document_url = getattr(obj.document, "url", "") or obj.document.file.url
         request = self.context.get("request")
         if request is None:
-            return obj.document.file.url
-        return request.build_absolute_uri(obj.document.file.url)
+            return document_url
+        return request.build_absolute_uri(document_url)
 
 
 class ResourceTableSerializer(serializers.ModelSerializer):

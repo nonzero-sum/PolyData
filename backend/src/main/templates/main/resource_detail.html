@@ -61,7 +61,7 @@
                 <a class="button-link" href="/datasets/{{ resource.dataset.slug }}/">Back to dataset</a>
                 {% with file_item=resource.file_representation %}
                     {% if file_item and file_item.document and file_item.document.file %}
-                        <a class="button-link primary" href="{{ file_item.document.file.url }}">Download</a>
+                        <a class="button-link primary" href="{{ file_item.document.url|default:file_item.document.file.url }}">Download</a>
                         <span class="button-link">{{ file_item.original_filename }}</span>
                     {% endif %}
                 {% endwith %}
