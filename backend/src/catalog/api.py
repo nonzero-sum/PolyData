@@ -15,15 +15,18 @@ from .services import fetch_resource_table_rows, get_primary_resource_table
 
 
 class DatasetViewSet(viewsets.ModelViewSet):
-    queryset = Dataset.objects.prefetch_related(
-        "resources__file_items",
-        "resources__tables",
-        "resources__api_items",
-    ).all()
+    queryset = Dataset.objects.select_related("organization", "license").all()
     serializer_class = DatasetSerializer
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        if self.action == "retrieve":
+            queryset = queryset.prefetch_related(
+                "resources__file_items",
+                "resources__tables",
+                "resources__api_items",
+            )
+
         search = self.request.query_params.get("search", "").strip()
         organization = self.request.query_params.get("organization", "").strip()
         if search:
@@ -31,6 +34,11 @@ class DatasetViewSet(viewsets.ModelViewSet):
         if organization:
             queryset = queryset.filter(organization__slug__iexact=organization)
         return queryset
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["include_resources"] = self.action == "retrieve"
+        return context
 
     @action(detail=True, methods=["get"])
     def resources(self, request, pk=None):

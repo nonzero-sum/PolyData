@@ -11,6 +11,14 @@ from urllib.parse import urlparse
 import geopandas as gpd
 import pandas as pd
 import yaml
+from geoalchemy2 import Geometry
+from geopandas.io.sql import (
+    _convert_linearring_to_linestring,
+    _convert_to_ewkb,
+    _get_geometry_type,
+    _get_srid_from_crs,
+    _psql_insert_copy,
+)
 
 from django.conf import settings
 from django.db import connection
@@ -367,6 +375,49 @@ def _build_layer_table_name(resource, layer_name=None):
     ).hexdigest()[:8]
     prefix = base_name[: IDENTIFIER_MAX_LENGTH - len(digest) - 1]
     return f"{prefix}_{digest}"
+
+
+def _build_spatial_index_name(table_name, geometry_field):
+    base_name = slugify(
+        f"{table_name}_{geometry_field}_gist",
+        allow_unicode=False,
+    ).replace("-", "_") or "spatial_index"
+    digest = hashlib.sha1(
+        f"{table_name}:{geometry_field}:gist".encode("utf-8"),
+        usedforsecurity=False,
+    ).hexdigest()[:8]
+    prefix = base_name[: IDENTIFIER_MAX_LENGTH - len(digest) - 1]
+    return f"{prefix}_{digest}"
+
+
+def _write_geodataframe_to_postgis(db_connection, schema_name, table_name, geodataframe, geometry_field):
+    geometry_type, has_curve = _get_geometry_type(geodataframe)
+    srid = _get_srid_from_crs(geodataframe)
+    prepared_geodataframe = geodataframe.copy()
+
+    if has_curve:
+        prepared_geodataframe = _convert_linearring_to_linestring(
+            prepared_geodataframe,
+            geometry_field,
+        )
+
+    dataframe = _convert_to_ewkb(prepared_geodataframe, geometry_field, srid)
+    dataframe.to_sql(
+        name=table_name,
+        con=db_connection,
+        schema=schema_name,
+        if_exists="replace",
+        index=True,
+        index_label="id",
+        dtype={
+            geometry_field: Geometry(
+                geometry_type=geometry_type,
+                srid=srid,
+                spatial_index=False,
+            )
+        },
+        method=_psql_insert_copy,
+    )
 
 
 def _load_csv_dataframe(file_representation):
@@ -918,25 +969,27 @@ def _load_geopackage_geodataframes(file_representation):
 def _replace_spatial_table(schema_name, table_name, geodataframe, geometry_field):
     quoted_schema = connection.ops.quote_name(schema_name)
     quoted_table = connection.ops.quote_name(table_name)
+    quoted_index_name = connection.ops.quote_name(
+        _build_spatial_index_name(table_name, geometry_field)
+    )
     engine = create_engine(_sqlalchemy_database_url(), future=True)
 
     try:
         with engine.begin() as db_connection:
             db_connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {quoted_schema}"))
-            geodataframe.to_postgis(
-                name=table_name,
-                con=db_connection,
-                schema=schema_name,
-                if_exists="replace",
-                index=True,
-                index_label="id",
+            _write_geodataframe_to_postgis(
+                db_connection,
+                schema_name,
+                table_name,
+                geodataframe,
+                geometry_field,
             )
             db_connection.execute(
                 text(f"ALTER TABLE {quoted_schema}.{quoted_table} ADD PRIMARY KEY (id)")
             )
             db_connection.execute(
                 text(
-                    f"CREATE INDEX IF NOT EXISTS {connection.ops.quote_name(f'{table_name}_{geometry_field}_gist')} "
+                    f"CREATE INDEX IF NOT EXISTS {quoted_index_name} "
                     f"ON {quoted_schema}.{quoted_table} USING GIST ({connection.ops.quote_name(geometry_field)})"
                 )
             )

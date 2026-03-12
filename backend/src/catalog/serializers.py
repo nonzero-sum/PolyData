@@ -190,6 +190,11 @@ class DatasetSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["slug", "created_at", "updated_at"]
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.context.get("include_resources", False):
+            self.fields.pop("resources", None)
+
     def get_dublin_core(self, obj):
         return obj.dublin_core
 
