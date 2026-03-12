@@ -49,7 +49,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      BACKEND_URL: http://127.0.0.1:8000
+      BACKEND_URL: http://backend:8000
+      NUXT_URL: http://127.0.0.1:8000
     healthcheck:
       test:
         [
@@ -70,7 +71,10 @@ services:
   valkey:
     image: valkey/valkey:latest
     ports:
-      - "8080:8080"
+      - 6379:6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
     networks:
       - django-liberty
 
