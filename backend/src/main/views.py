@@ -1,6 +1,6 @@
 from django.views.generic import DetailView, ListView, TemplateView
 
-from catalog.models import Dataset, Organization, Resource
+from catalog.models import Dataset, DatasetTag, Organization, Resource
 from catalog.serializers import ResourceTableSerializer
 
 
@@ -10,6 +10,7 @@ class HomeView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["dataset_count"] = Dataset.objects.count()
+        context["resource_count"] = Resource.objects.count()
         context["organization_count"] = Organization.objects.count()
         context["search_query"] = (self.request.GET.get("search") or "").strip()
         return context
@@ -22,15 +23,24 @@ class DatasetListView(ListView):
     paginate_by = 24
 
     def get_queryset(self):
-        queryset = Dataset.objects.select_related("organization", "license").order_by("title")
+        queryset = (
+            Dataset.objects.select_related("organization", "license")
+            .prefetch_related("tags")
+            .order_by("title")
+        )
         search = (self.request.GET.get("search") or "").strip()
+        selected_tag_slug = (self.request.GET.get("tag") or "").strip()
         if search:
             queryset = queryset.filter(title__icontains=search)
-        return queryset
+        if selected_tag_slug:
+            queryset = queryset.filter(tags__slug=selected_tag_slug)
+        return queryset.distinct()
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["search_query"] = (self.request.GET.get("search") or "").strip()
+        context["selected_tag_slug"] = (self.request.GET.get("tag") or "").strip()
+        context["available_tags"] = DatasetTag.objects.order_by("name")
         return context
 
 
@@ -47,6 +57,34 @@ class DatasetDetailView(DetailView):
             "resources__tables",
             "resources__api_items",
         )
+
+
+class ResourceListView(ListView):
+    model = Resource
+    template_name = "main/resource_list.html"
+    context_object_name = "resources"
+    paginate_by = 24
+
+    def get_queryset(self):
+        queryset = (
+            Resource.objects.select_related("dataset", "dataset__organization")
+            .prefetch_related("file_items")
+            .order_by("title")
+        )
+        search = (self.request.GET.get("search") or "").strip()
+        selected_kind = (self.request.GET.get("kind") or "").strip()
+        if search:
+            queryset = queryset.filter(title__icontains=search)
+        if selected_kind:
+            queryset = queryset.filter(resource_kind=selected_kind)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["search_query"] = (self.request.GET.get("search") or "").strip()
+        context["selected_kind"] = (self.request.GET.get("kind") or "").strip()
+        context["available_resource_kinds"] = Resource.ResourceKind.choices
+        return context
 
 
 class ResourceDetailView(DetailView):

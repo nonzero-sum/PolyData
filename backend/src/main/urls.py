@@ -25,11 +25,13 @@ from .views import (
     OrganizationDetailView,
     OrganizationListView,
     ResourceDetailView,
+    ResourceListView,
 )
 
 urlpatterns = [
     path("", HomeView.as_view(), name="home"),
     path("datasets/", DatasetListView.as_view(), name="dataset-list"),
+    path("resources/", ResourceListView.as_view(), name="resource-list"),
     path("datasets/<slug:slug>/", DatasetDetailView.as_view(), name="dataset-detail"),
     path(
         "datasets/<slug:dataset_slug>/resources/<slug:resource_slug>/",

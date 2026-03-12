@@ -33,11 +33,16 @@
         .search-form { display: grid; grid-template-columns: 1fr auto; gap: 12px; margin: 24px 0 30px; }
         .search-input { border: 1px solid rgba(15, 118, 110, 0.22); border-radius: 18px; padding: 16px 18px; font: inherit; background: rgba(255,255,255,0.86); }
         .search-button { border: 0; border-radius: 18px; padding: 0 22px; min-height: 54px; font: inherit; font-weight: 700; color: white; background: var(--accent); cursor: pointer; }
+        .filters { display: flex; flex-wrap: wrap; gap: 10px; margin: -8px 0 24px; }
+        .filter-pill { display: inline-flex; align-items: center; justify-content: center; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,0.68); color: var(--muted); font-size: 0.94rem; }
+        .filter-pill.active { background: rgba(15, 118, 110, 0.12); border-color: rgba(15, 118, 110, 0.24); color: var(--accent); }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; padding-bottom: 56px; }
         .card { display: block; border: 1px solid var(--line); border-radius: 24px; padding: 22px; background: var(--card); }
         .card h2 { margin: 0 0 12px; font-size: 1.35rem; }
         .card p { margin: 0 0 14px; color: var(--muted); line-height: 1.6; }
         .meta { color: var(--muted); font-size: 0.95rem; }
+        .tag-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+        .tag-pill { display: inline-flex; align-items: center; justify-content: center; padding: 7px 10px; border-radius: 999px; background: rgba(15, 118, 110, 0.08); color: var(--accent); font-size: 0.82rem; }
         .empty { padding: 28px; border: 1px dashed var(--line); border-radius: 24px; color: var(--muted); background: rgba(255,255,255,0.42); }
         .card:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(31, 42, 42, 0.08); }
         @media (max-width: 720px) { .header { flex-direction: column; gap: 14px; align-items: flex-start; } .search-form { grid-template-columns: 1fr; } }
@@ -49,6 +54,7 @@
             <a class="brand" href="/">PolyData</a>
             <nav class="nav" aria-label="Primary navigation">
                 <a href="/datasets/">Datasets</a>
+                <a href="/resources/">Resources</a>
                 <a href="/organizations/">Organizations</a>
                 <a href="/api/">API</a>
                 <a href="/api/schema/swagger-ui/">Swagger</a>
@@ -57,11 +63,20 @@
         </header>
         <section class="intro">
             <h1>Datasets</h1>
-            <p class="subtitle">Browse the public catalog or filter it quickly by title.</p>
+            <p class="subtitle">Browse the public catalog and filter datasets by title or controlled tags.</p>
             <form class="search-form" action="/datasets/" method="get">
+                {% if selected_tag_slug %}<input type="hidden" name="tag" value="{{ selected_tag_slug }}">{% endif %}
                 <input class="search-input" type="search" name="search" value="{{ search_query }}" placeholder="Search datasets by title" aria-label="Search datasets">
                 <button class="search-button" type="submit">Search</button>
             </form>
+            {% if available_tags %}
+                <div class="filters" aria-label="Dataset tag filters">
+                    <a class="filter-pill{% if not selected_tag_slug %} active{% endif %}" href="/datasets/{% if search_query %}?search={{ search_query|urlencode }}{% endif %}">All tags</a>
+                    {% for tag in available_tags %}
+                        <a class="filter-pill{% if selected_tag_slug == tag.slug %} active{% endif %}" href="/datasets/?tag={{ tag.slug|urlencode }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}">{{ tag.name }}</a>
+                    {% endfor %}
+                </div>
+            {% endif %}
         </section>
         {% if datasets %}
             <section class="grid">
@@ -73,11 +88,18 @@
                             {% if dataset.organization %}<div>Organization: {{ dataset.organization.title }}</div>{% endif %}
                             <div>Frequency: {{ dataset.get_update_frequency_display }}</div>
                         </div>
+                        {% if dataset.tag_names %}
+                            <div class="tag-row">
+                                {% for tag_name in dataset.tag_names %}
+                                    <span class="tag-pill">{{ tag_name }}</span>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
                     </a>
                 {% endfor %}
             </section>
         {% else %}
-            <div class="empty">No datasets matched this search.</div>
+            <div class="empty">No datasets matched the current search and tag filters.</div>
         {% endif %}
     </div>
 </body>

@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Organizations | PolyData</title>
+    <title>Resources | PolyData</title>
     <style>
         :root {
             --paper: #f7f1e8;
@@ -25,19 +25,23 @@
         .shell { width: min(1120px, calc(100vw - 32px)); margin: 0 auto; }
         .header { display: flex; align-items: center; justify-content: space-between; padding: 24px 0; }
         .brand { font-size: 1.15rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
-        .nav { display: flex; gap: 18px; }
+        .nav { display: flex; gap: 18px; flex-wrap: wrap; }
         .nav a { padding: 10px 14px; border-radius: 999px; color: var(--muted); }
         .intro { padding: 24px 0 12px; }
         h1 { margin: 0; font-size: clamp(2.4rem, 6vw, 4.4rem); }
         .subtitle { color: var(--muted); max-width: 58ch; line-height: 1.7; }
-        .search-form { display: grid; grid-template-columns: 1fr auto; gap: 12px; margin: 24px 0 30px; }
+        .search-form { display: grid; grid-template-columns: 1fr auto; gap: 12px; margin: 24px 0 24px; }
         .search-input { border: 1px solid rgba(15, 118, 110, 0.22); border-radius: 18px; padding: 16px 18px; font: inherit; background: rgba(255,255,255,0.86); }
         .search-button { border: 0; border-radius: 18px; padding: 0 22px; min-height: 54px; font: inherit; font-weight: 700; color: white; background: var(--accent); cursor: pointer; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; padding-bottom: 56px; }
+        .filters { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 24px; }
+        .filter-pill { display: inline-flex; align-items: center; justify-content: center; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,0.68); color: var(--muted); font-size: 0.94rem; }
+        .filter-pill.active { background: rgba(15, 118, 110, 0.12); border-color: rgba(15, 118, 110, 0.24); color: var(--accent); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; padding-bottom: 56px; }
         .card { display: block; border: 1px solid var(--line); border-radius: 24px; padding: 22px; background: var(--card); }
         .card h2 { margin: 0 0 12px; font-size: 1.35rem; }
         .card p { margin: 0 0 14px; color: var(--muted); line-height: 1.6; }
-        .meta { color: var(--muted); font-size: 0.95rem; }
+        .meta { color: var(--muted); font-size: 0.95rem; display: grid; gap: 6px; }
+        .kind-pill { display: inline-flex; align-items: center; justify-content: center; margin-bottom: 10px; padding: 7px 10px; border-radius: 999px; background: rgba(15, 118, 110, 0.08); color: var(--accent); font-size: 0.82rem; }
         .empty { padding: 28px; border: 1px dashed var(--line); border-radius: 24px; color: var(--muted); background: rgba(255,255,255,0.42); }
         .card:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(31, 42, 42, 0.08); }
         @media (max-width: 720px) { .header { flex-direction: column; gap: 14px; align-items: flex-start; } .search-form { grid-template-columns: 1fr; } }
@@ -57,28 +61,37 @@
             </nav>
         </header>
         <section class="intro">
-            <h1>Organizations</h1>
-            <p class="subtitle">A simple directory of the organizations behind the catalog.</p>
-            <form class="search-form" action="/organizations/" method="get">
-                <input class="search-input" type="search" name="search" value="{{ search_query }}" placeholder="Search organizations by title" aria-label="Search organizations">
+            <h1>Resources</h1>
+            <p class="subtitle">Browse all public resources and filter them by resource type.</p>
+            <form class="search-form" action="/resources/" method="get">
+                {% if selected_kind %}<input type="hidden" name="kind" value="{{ selected_kind }}">{% endif %}
+                <input class="search-input" type="search" name="search" value="{{ search_query }}" placeholder="Search resources by title" aria-label="Search resources">
                 <button class="search-button" type="submit">Search</button>
             </form>
+            <div class="filters" aria-label="Resource type filters">
+                <a class="filter-pill{% if not selected_kind %} active{% endif %}" href="/resources/{% if search_query %}?search={{ search_query|urlencode }}{% endif %}">All types</a>
+                {% for value, label in available_resource_kinds %}
+                    <a class="filter-pill{% if selected_kind == value %} active{% endif %}" href="/resources/?kind={{ value|urlencode }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}">{{ label }}</a>
+                {% endfor %}
+            </div>
         </section>
-        {% if organizations %}
+        {% if resources %}
             <section class="grid">
-                {% for organization in organizations %}
-                    <a class="card" href="/organizations/{{ organization.slug }}/">
-                        <h2>{{ organization.title }}</h2>
-                        <p>{{ organization.description|default:"No description yet." }}</p>
+                {% for resource in resources %}
+                    <a class="card" href="/datasets/{{ resource.dataset.slug }}/resources/{{ resource.slug }}/">
+                        <div class="kind-pill">{{ resource.get_resource_kind_display }}</div>
+                        <h2>{{ resource.title }}</h2>
+                        <p>{{ resource.description|default:"No description yet." }}</p>
                         <div class="meta">
-                            {% if organization.url %}<div>{{ organization.url }}</div>{% endif %}
-                            {% if organization.email %}<div>{{ organization.email }}</div>{% endif %}
+                            <div>Dataset: {{ resource.dataset.title }}</div>
+                            {% if resource.dataset.organization %}<div>Organization: {{ resource.dataset.organization.title }}</div>{% endif %}
+                            <div>Status: {{ resource.get_processing_status_display }}</div>
                         </div>
                     </a>
                 {% endfor %}
             </section>
         {% else %}
-            <div class="empty">No organizations matched this search.</div>
+            <div class="empty">No resources matched the current search and type filters.</div>
         {% endif %}
     </div>
 </body>
