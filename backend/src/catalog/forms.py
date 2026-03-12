@@ -1,12 +1,13 @@
 import json
 import re
 
+from django import forms
 from wagtail.admin.forms.models import WagtailAdminModelForm
 from wagtail.documents import get_document_model
 from wagtail.documents.forms import BaseDocumentForm
 
 from .file_formats import allowed_upload_extensions_accept, validate_allowed_upload
-from .models import Dataset, Resource
+from .models import Dataset, DatasetTag, Resource
 from ingestion.services import suggest_resource_kind_from_document
 
 
@@ -36,9 +37,39 @@ class CatalogDocumentForm(BaseDocumentForm):
 
 
 class DatasetForm(WagtailAdminModelForm):
+    tags = forms.ModelMultipleChoiceField(
+        queryset=DatasetTag.objects.all(),
+        required=False,
+        widget=forms.SelectMultiple(attrs={"size": 8}),
+    )
+
     class Meta:
         model = Dataset
         fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        tags_field = self.fields.get("tags")
+        if tags_field is None:
+            return
+
+        tags_field.queryset = DatasetTag.objects.all().order_by("name")
+        tags_field.help_text = (
+            "Select one or more existing tags. New tags must be created first in Snippets."
+        )
+
+        if getattr(self.instance, "pk", None):
+            tags_field.initial = self.instance.tags.all()
+
+    def save(self, commit=True):
+        selected_tags = self.cleaned_data.get("tags")
+        instance = super().save(commit=commit)
+
+        if commit and selected_tags is not None:
+            instance.tags.set(selected_tags)
+
+        return instance
 
 
 class ResourceForm(WagtailAdminModelForm):

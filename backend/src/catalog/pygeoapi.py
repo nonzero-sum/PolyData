@@ -25,7 +25,7 @@ def _resource_bbox(resource):
 
 
 def _resource_keywords(resource):
-    tags = resource.resource.dataset.tags if isinstance(resource.resource.dataset.tags, list) else []
+    tags = resource.resource.dataset.tag_names
     keywords = [*tags, resource.resource.resource_kind, resource.resource.storage_kind]
     return [keyword for keyword in keywords if keyword]
 

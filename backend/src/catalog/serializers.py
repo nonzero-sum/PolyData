@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from .models import (
     Dataset,
+    DatasetTag,
     LicenseType,
     Organization,
     Resource,
@@ -9,6 +10,42 @@ from .models import (
     ResourceFile,
     ResourceTable,
 )
+
+
+class TagNameListField(serializers.Field):
+    default_error_messages = {
+        "not_a_list": "Expected a list of tag names.",
+        "invalid_item": "Each tag must be a non-empty string.",
+        "unknown_tags": "Unknown tags: {tags}",
+    }
+
+    def to_representation(self, value):
+        return list(value.values_list("name", flat=True))
+
+    def to_internal_value(self, data):
+        if data in (None, ""):
+            return []
+        if not isinstance(data, list):
+            self.fail("not_a_list")
+
+        normalized_tags = []
+        for item in data:
+            if not isinstance(item, str):
+                self.fail("invalid_item")
+            normalized_name = item.strip()
+            if not normalized_name:
+                self.fail("invalid_item")
+            if normalized_name not in normalized_tags:
+                normalized_tags.append(normalized_name)
+
+        existing_names = set(
+            DatasetTag.objects.filter(name__in=normalized_tags).values_list("name", flat=True)
+        )
+        unknown_tags = [tag_name for tag_name in normalized_tags if tag_name not in existing_names]
+        if unknown_tags:
+            self.fail("unknown_tags", tags=", ".join(unknown_tags))
+
+        return normalized_tags
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -170,6 +207,7 @@ class DatasetSerializer(serializers.ModelSerializer):
     resources = ResourceSerializer(many=True, read_only=True)
     dublin_core = serializers.SerializerMethodField()
     metadata = serializers.SerializerMethodField()
+    tags = TagNameListField(required=False)
     organization = OrganizationSerializer(read_only=True)
     license = LicenseTypeSerializer(read_only=True)
     organization_id = serializers.PrimaryKeyRelatedField(
@@ -227,3 +265,17 @@ class DatasetSerializer(serializers.ModelSerializer):
 
     def get_metadata(self, obj):
         return obj.metadata
+
+    def create(self, validated_data):
+        tags = validated_data.pop("tags", [])
+        dataset = super().create(validated_data)
+        if tags:
+            dataset.tags.set(tags)
+        return dataset
+
+    def update(self, instance, validated_data):
+        tags = validated_data.pop("tags", None)
+        dataset = super().update(instance, validated_data)
+        if tags is not None:
+            dataset.tags.set(tags)
+        return dataset

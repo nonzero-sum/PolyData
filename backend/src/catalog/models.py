@@ -3,11 +3,13 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.html import escape, format_html, format_html_join
 from django.utils.text import slugify
-from wagtail.admin.panels import FieldPanel, HelpPanel, InlinePanel, MultiFieldPanel
-from wagtail.log_actions import registry as log_action_registry
+from modelcluster.contrib.taggit import ClusterTaggableManager
 from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
+from taggit.models import TagBase, TaggedItemBase
+from wagtail.admin.panels import FieldPanel, HelpPanel, InlinePanel, MultiFieldPanel
 from wagtail.documents import get_document_model_string
+from wagtail.log_actions import registry as log_action_registry
 from wagtail.snippets.models import register_snippet
 
 from .file_formats import validate_allowed_upload
@@ -150,6 +152,29 @@ class LicenseType(models.Model):
         super().save(*args, **kwargs)
 
 
+@register_snippet
+class DatasetTag(TagBase):
+    free_tagging = False
+
+    class Meta:
+        verbose_name = "dataset tag"
+        verbose_name_plural = "dataset tags"
+        ordering = ["name"]
+
+
+class DatasetTaggedItem(TaggedItemBase):
+    content_object = ParentalKey(
+        "catalog.Dataset",
+        on_delete=models.CASCADE,
+        related_name="tagged_items",
+    )
+    tag = models.ForeignKey(
+        "catalog.DatasetTag",
+        related_name="tagged_items",
+        on_delete=models.CASCADE,
+    )
+
+
 class Dataset(ClusterableModel):
     class UpdateFrequency(models.TextChoices):
         AS_NEEDED = "as_needed", "As needed"
@@ -191,7 +216,7 @@ class Dataset(ClusterableModel):
     dc_language = models.TextField(blank=True)
     dc_relation = models.TextField(blank=True)
     dc_coverage = models.TextField(blank=True)
-    tags = models.JSONField(default=list, blank=True)
+    tags = ClusterTaggableManager(through="catalog.DatasetTaggedItem", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -217,6 +242,12 @@ class Dataset(ClusterableModel):
 
     def __str__(self):
         return self.title
+
+    @property
+    def tag_names(self):
+        if not self.pk:
+            return []
+        return list(self.tags.values_list("name", flat=True))
 
     def dublin_core_defaults(self):
         return {
