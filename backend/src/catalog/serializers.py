@@ -1,6 +1,5 @@
 from rest_framework import serializers
 
-from .metadata_schemas import validate_metadata_payload
 from .models import (
     Dataset,
     LicenseType,
@@ -152,6 +151,7 @@ class ResourceSerializer(serializers.ModelSerializer):
 class DatasetSerializer(serializers.ModelSerializer):
     resources = ResourceSerializer(many=True, read_only=True)
     dublin_core = serializers.SerializerMethodField()
+    metadata = serializers.SerializerMethodField()
     organization = OrganizationSerializer(read_only=True)
     license = LicenseTypeSerializer(read_only=True)
     organization_id = serializers.PrimaryKeyRelatedField(
@@ -176,6 +176,15 @@ class DatasetSerializer(serializers.ModelSerializer):
             "title",
             "slug",
             "description",
+            "dc_subject",
+            "dc_description",
+            "dc_date",
+            "dc_type",
+            "dc_format",
+            "dc_source",
+            "dc_language",
+            "dc_relation",
+            "dc_coverage",
             "dublin_core",
             "metadata",
             "license",
@@ -198,6 +207,5 @@ class DatasetSerializer(serializers.ModelSerializer):
     def get_dublin_core(self, obj):
         return obj.dublin_core
 
-    def validate_metadata(self, value):
-        validate_metadata_payload(value)
-        return value
+    def get_metadata(self, obj):
+        return obj.metadata

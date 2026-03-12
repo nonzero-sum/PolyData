@@ -11,7 +11,7 @@ from wagtail.documents import get_document_model_string
 from wagtail.snippets.models import register_snippet
 
 from .file_formats import validate_allowed_upload
-from .metadata_schemas import DUBLIN_CORE_FIELDS, apply_metadata_field_defaults, dublin_core_editable_fields, metadata_editor_initial, validate_metadata_payload
+from .metadata_schemas import DUBLIN_CORE_FIELDS, dublin_core_editable_fields
 
 
 def _generate_unique_slug(model_class, source_value, instance_pk=None, parent_field=None):
@@ -182,7 +182,15 @@ class Dataset(ClusterableModel):
         blank=True,
         null=True,
     )
-    metadata = models.JSONField(default=dict, blank=True)
+    dc_subject = models.TextField(blank=True)
+    dc_description = models.TextField(blank=True)
+    dc_date = models.TextField(blank=True)
+    dc_type = models.TextField(blank=True)
+    dc_format = models.TextField(blank=True)
+    dc_source = models.TextField(blank=True)
+    dc_language = models.TextField(blank=True)
+    dc_relation = models.TextField(blank=True)
+    dc_coverage = models.TextField(blank=True)
     tags = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -197,12 +205,9 @@ class Dataset(ClusterableModel):
                 FieldPanel("update_frequency"),
                 FieldPanel("organization"),
                 FieldPanel("tags"),
+                *[FieldPanel(field_name) for field_name, _label in dublin_core_editable_fields()],
             ],
             heading="Metadata",
-        ),
-        MultiFieldPanel(
-            [FieldPanel(field_name) for field_name, _label in dublin_core_editable_fields()],
-            heading="Dublin Core",
         ),
         InlinePanel("resources", label="Resource", heading="Resources"),
     ]
@@ -216,6 +221,19 @@ class Dataset(ClusterableModel):
     def dublin_core_defaults(self):
         return {
             "description": self.description,
+        }
+
+    def dublin_core_editor_values(self):
+        return {
+            "subject": self.dc_subject,
+            "description": self.dc_description or self.description,
+            "date": self.dc_date,
+            "type": self.dc_type,
+            "format": self.dc_format,
+            "source": self.dc_source,
+            "language": self.dc_language,
+            "relation": self.dc_relation,
+            "coverage": self.dc_coverage,
         }
 
     def _creator_log_entry(self):
@@ -257,10 +275,14 @@ class Dataset(ClusterableModel):
         }
 
     def get_dublin_core(self, fallback_user=None):
-        metadata = metadata_editor_initial(self.metadata)
-        metadata["schema"] = "dublincore"
-        metadata = apply_metadata_field_defaults(metadata, self.dublin_core_defaults())
-        metadata["fields"].update(
+        fields = {field_name: "" for field_name in DUBLIN_CORE_FIELDS}
+        fields.update(
+            {
+                field_name: "" if field_value in (None, "") else str(field_value)
+                for field_name, field_value in self.dublin_core_editor_values().items()
+            }
+        )
+        fields.update(
             {
                 field_name: "" if field_value in (None, "") else str(field_value)
                 for field_name, field_value in self.dublin_core_managed_values(
@@ -268,41 +290,42 @@ class Dataset(ClusterableModel):
                 ).items()
             }
         )
-        return metadata
+        return {
+            "schema": "dublincore",
+            "fields": fields,
+        }
 
     def set_dublin_core(self, value, fallback_user=None):
-        payload = metadata_editor_initial(value)
-        payload["schema"] = "dublincore"
-        payload = apply_metadata_field_defaults(payload, self.dublin_core_defaults())
-        payload["fields"].update(
-            {
-                field_name: "" if field_value in (None, "") else str(field_value)
-                for field_name, field_value in self.dublin_core_managed_values(
-                    fallback_user=fallback_user,
-                ).items()
-            }
-        )
-        self.metadata = payload
+        fields = {}
+        if isinstance(value, dict):
+            payload_fields = value.get("fields", {})
+            if isinstance(payload_fields, dict):
+                fields = payload_fields
+
+        self.dc_subject = fields.get("subject", "") or ""
+        self.dc_description = fields.get("description", "") or ""
+        self.dc_date = fields.get("date", "") or ""
+        self.dc_type = fields.get("type", "") or ""
+        self.dc_format = fields.get("format", "") or ""
+        self.dc_source = fields.get("source", "") or ""
+        self.dc_language = fields.get("language", "") or ""
+        self.dc_relation = fields.get("relation", "") or ""
+        self.dc_coverage = fields.get("coverage", "") or ""
 
     dublin_core = property(get_dublin_core, set_dublin_core)
+    metadata = property(get_dublin_core, set_dublin_core)
 
     def get_dublin_core_value(self, field_name):
         return self.dublin_core.get("fields", {}).get(field_name, "")
 
     def set_dublin_core_value(self, field_name, value):
-        payload = self.dublin_core
-        payload.setdefault("fields", {})[field_name] = value or ""
-        self.dublin_core = payload
-
-    def clean(self):
-        super().clean()
-        self.dublin_core = self.metadata
-        validate_metadata_payload(self.metadata)
+        if field_name in {"title", "creator", "publisher", "contributor", "identifier", "rights"}:
+            return
+        setattr(self, f"dc_{field_name}", value or "")
 
     def save(self, *args, **kwargs):
         if not self.slug:
             self.slug = _generate_unique_slug(Dataset, self.title, self.pk)
-        self.dublin_core = self.metadata
         super().save(*args, **kwargs)
 
 
@@ -314,11 +337,6 @@ def _build_dublin_core_property(field_name):
         self.set_dublin_core_value(field_name, value)
 
     return property(getter, setter)
-
-
-for _field_name in DUBLIN_CORE_FIELDS:
-    setattr(Dataset, f"dc_{_field_name}", _build_dublin_core_property(_field_name))
-
 
 class Resource(ClusterableModel):
     class ResourceKind(models.TextChoices):
@@ -380,9 +398,9 @@ class Resource(ClusterableModel):
         FieldPanel("published"),
         MultiFieldPanel(
             [
-                FieldPanel("processing_status"),
-                FieldPanel("processing_message"),
-                FieldPanel("processed_at"),
+                FieldPanel("processing_status", read_only=True),
+                FieldPanel("processing_message", read_only=True),
+                FieldPanel("processed_at", read_only=True),
             ],
             heading="Processing",
         ),
@@ -463,17 +481,6 @@ class Resource(ClusterableModel):
         super().clean()
         self.storage_kind = self.normalize_storage_kind(self.storage_kind)
 
-        if (
-            self.storage_kind == self.StorageKind.DEFAULT_POSTGRES
-            and not self.supports_postgres_storage(self.resource_kind)
-        ):
-            raise ValidationError(
-                {
-                    "storage_kind": (
-                        "Default + Postgres is only available for tabular or spatial resources."
-                    )
-                }
-            )
 
     def save(self, *args, **kwargs):
         if self.resource_kind == "file":
