@@ -1,162 +1,137 @@
-# Django Liberty 🗽
+# PolyData 📦
 
-Easy decoupled Django projects with OIDC Auth.
+A geospatial data portal built on Django, Wagtail and PygeoAPI.
 
-## TL;DR
+## Overview
 
-Recommended
-```python
-uvx cookiecutter && cookiecutter https://github.com/roicort/django-liberty.git
-```
-Or
-```python
-pip install cookiecutter && cookiecutter https://github.com/roicort/django-liberty.git
-```
+PolyData is a modular platform for ingesting, managing, and publishing
+geospatial datasets. Its architecture combines a Django backend with:
 
-### What?
+- Wagtail CMS for content and administration
+- Catalog API and OGC services (pygeoapi) on top of PostGIS
+- OpenID Connect authentication (OIDC) using `django-oidc-provider`
+- Internal apps (`account`, `catalog`, `ingestion`, `main`) containing
+  business logic
+- Docker containers ready for development and deployment
 
-Django Liberty is a cookiecutter template for Decoupled Django projects. It is a full-stack template that includes both backend and frontend. The backend part is based on Django and the frontend is based on Nuxt or Next.js (your choice).
-Cookiecutter handles the project creation and configuration, secrets, and environment variables. The project is ready to run with Docker Compose and pre-configured with OIDC Auth, Unfold admin theme, and custom user model.
+## Features
 
-### Why?
+- **OIDC authentication** for users and relying-party clients
+- **Unfold-themed admin** with user management
+- **REST API** with OpenAPI/Swagger (`drf-spectacular`)
+- **OGC API service** configurable via environment variables
+- **Data ingestion** leveraging PostGIS and GeoAlchemy
+- **Flexible configuration** through env vars
+- **Docker Compose** orchestration of database and Django server
 
-The main problem I encountered while decoupling Django was the authentication, while some boilerplates provide JWT Auth, I wanted to use OpenID Connect (OIDC) for authentication. As I spent a lot of time setting this, I decided to create a cookiecutter template that includes all the necessary packages and configurations to start a new project quickly.
+## Requirements
 
-### Current Status
-
-- [x] Cookiecutter template
-  - [x] Docker Compose
-  - [x] Postgenerate hooks
-  - [x] Frontend choice
-- [x] Django backend
-  - [x] Dockerfile
-  - [x] Custom user model with email as username (Account)
-  - [x] OIDC Provider Config
-  - [x] Unfold Admin
-  - [x] OpenAPI
-  - [x] Claims
-  - [ ] OIDC Templates
-- [ ] Next frontend
-  - [x] Dockerfile
-  - [x] Auth.js
-- [ ] Nuxt frontend
-  - [ ] Dockerfile
-  - [ ] Auth.js
-
-### Features
-
-- **Cookiecutter**: Start a new project by just running `cookiecutter https://github.com/roicort/django-liberty.git`
-- **Docker Compose**: start both front end and backend by just running `docker-compose up --build`
-- **Django backend**: Custom django backend with Unfold Admin
-- **Custom user model**: extended default Django user model to include additional fields
-- **Decoupled frontend**: Nuxt and Next available (WIP)
-- **OIDC Auth**: Pre-configured OIDC Auth with Django as Provider and Frontend-[Nuxt/Next] as RP (Client)
-- **Admin Theme**: Unfold admin theme with user & group management
-
-![](https://github.com/user-attachments/assets/2ff0d3ff-dfdf-4dab-ad54-c9e6131e9788)
+- Docker & Docker Compose
+- (Optional for local tasks) Python 3.14+
+- PostgreSQL with PostGIS extension (provided by the `db` container)
 
 ## Quickstart
 
-To start using django-liberty, it is needed to create a cookiecutter project from the template. After the project is created, it is possible to start the project by running docker-compose command.
+1. Clone the repository:
 
-```
-cookiecutter https://github.com/roicort/django-liberty.git
-```
+   ```bash
+   git clone https://github.com/tu-org/PolyData.git
+   cd PolyData
+   ```
 
-- Set {{cookiecutter.project_slug}}
-- Select {{cookiecutter.frontend}} [Nuxt or Next]
+2. Copy and edit the environment files:
 
-### Running docker-compose
+   ```bash
+   cp backend/.env.example backend/.env
+   # adjust DB_*, SECRET_KEY, DJANGO_URL, FRONTEND_URL, etc.
+   ```
 
-```bash
-cd {{cookiecutter.project_slug}}
-docker compose up -d --build
-```
+3. Bring up the services:
 
-Then, open the browser and navigate to `http://localhost:3000` to see the front end part of the application. To access Django admin, navigate to `http://localhost:8000/admin/`.
+   ```bash
+   docker-compose up -d --build
+   ```
 
-### Backend dependencies
+   This will start the `db` (PostGIS) and `backend` (Django/Gunicorn)
+   containers.
 
-For dependency management in Django application we are using UV. When starting the project through the docker-compose command, it is checked for new dependencies as well. In the case they are not installed, docker will install them before running development server.
+4. Create a Django superuser to access the admin:
 
-- **[djangorestframework](https://github.com/encode/django-rest-framework)** - REST API support
-- **[django-oidc-provider]()** - OIDC Provider
-- **[drf-spectacular](https://github.com/tfranzel/drf-spectacular)** - OpenAPI schema generator
-- **[django-unfold](https://github.com/unfoldadmin/django-unfold)** - Admin theme for Django admin panel
+   ```bash
+   docker-compose exec backend uv run src/manage.py createsuperuser
+   ```
 
-Below, you can find a command to install new dependency into backend project.
+5. Visit the key endpoints:
+   - Django admin: `http://localhost:8000/admin/`
+   - Wagtail admin: `http://localhost:8000/cms/` (if enabled)
+   - REST API: `http://localhost:8000/api/`
+   - PygeoAPI: `http://localhost:8000/geoapi/` (configurable via
+     `PYGEOAPI_BASE_PATH`)
+   - Swagger/OpenAPI: `http://localhost:8000/api/schema/swagger-ui/`
 
-```bash
-docker compose exec backend uv add djangorestframework
-```
+## Development
 
-For initializing the backend first run init.sh within the container (No longer needed)
-
-```bash
-docker compose exec backend bash
-```
-
-```bash
-bash init.sh
-```
-
-And create a superuser (No longer needed, can be done through env)
+Inside the backend container:
 
 ```bash
-uv run manage.py createsuperuser
+docker-compose exec backend bash
+# then use manage.py or uv like any Django project
+uv run src/manage.py migrate
+uv run src/manage.py runserver 0.0.0.0:8000
 ```
 
-## ⚠️ Hosts config ⚠️
-
-In the case you want to locally try the OIDC login, you may add the backend to the hosts file. Its necessary to have two separate hosts for the frontend and backend.
+Python dependencies are managed with [UV](https://github.com/jazzband/uv):
 
 ```bash
-sudo [vi/nano] /etc/hosts
+docker-compose exec backend uv add <package>
 ```
 
-    ##
-    # Host Database
-    #
-    # localhost is used to configure the loopback interface
-    # when the system is booting.  Do not change this entry.
-    ##
-    127.0.0.1       localhost
-    255.255.255.255 broadcasthost
-    ::1             localhost
-    127.0.0.1       backend          <--- add this line
+## Project structure
 
-After that, when your frontend redirects you to the login page, you be able to see `http://backend:8000/oidc/etc..`
+- `backend/` – main Django application
+  - `account/` – custom user model and auth
+  - `catalog/` – catalog logic and pygeoapi configuration
+  - `ingestion/` – data loading services
+  - `main/` – settings, urls and general views
+- `frontend/` – (optional) code for a decoupled client
+- `docker-compose.yaml` – defines `db` and `backend` services
 
-## Authentication
+## Important environment variables
 
-For the authentication, Django Liberty uses **django-oidc-provider** and **auth.js** package to provide Open ID Connect authentication. All configuration and secrets are generated by cookiecutter and set in envs.
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
+- `SECRET_KEY`, `DEBUG`, `DJANGO_URL`, `FRONTEND_URL`
+- `PYGEOAPI_TABLE`, `PYGEOAPI_BASE_PATH`, `PYGEOAPI_TITLE`, etc.
 
-### User accounts on the backend
+See `backend/src/main/settings/base.py` for the full list with comments.
 
-There are two ways how to create new user account in the backend. First option is to run managed command responsible for creating superuser. It is more or less required, if you want to have an access to the Django admin. After running the command below, it will be possible to log in on the front end part of the application.
+## Publishing geospatial data
 
-```bash
-docker compose exec backend uv run manage.py createsuperuser
-```
+1. Load your table into PostGIS (schema `resource_data` by default).
+2. Set `PYGEOAPI_TABLE` pointing to `schema.table`.
+3. Access the OGC API service at the configured path (`/geoapi/`).
 
-The second option how to create new user account is to register it on the front end. The Django admin provides simple registration form in account/signup/ endpoint. After the registration, the user account will be created in the backend.
+## Deployment
 
-### OpenAPI
+You can deploy on any container platform. Be sure to:
 
-By default, Django Liberty includes and endpoint for OpenAPI schema which is available in Swagger `http://localhost:8000/api/schema/swagger-ui/` or ReDOC in `http://localhost:8000/api/schema/redoc/`
+1. Adjust environment variables for production (`DEBUG=false`, hosts,
+   etc.).
+2. Use an appropriate WSGI/ASGI backend (Gunicorn is already configured).
+3. Mount persistent volumes for `db` and `backend` if needed.
 
-## 🤝 Contributing
+## Contributing
 
-Contributions, issues and feature requests are welcome!
+Pull requests are welcome! 🙌
 
-## ⭐️ Support
-
-Give a ⭐️ if you liked this project
+1. Fork and branch with a `feature/` or `fix/` prefix.
+2. Add tests and documentation when applicable.
+3. Open a PR describing your change.
+4. Respond to feedback and keep commits tidy.
 
 ## License
 
-The MIT License
+This project is licensed under the GNU Affero General Public License. See the [LICENSE](LICENSE) file for details.
 
-## Shoutout
+---
 
-### This project aims to be an extention of the idea by [Turbo](https://github.com/unfoldadmin/turbo)
+_Thanks for using PolyData!_ 🌍
