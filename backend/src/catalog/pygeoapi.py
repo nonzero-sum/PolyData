@@ -6,6 +6,14 @@ from django.db import OperationalError, ProgrammingError
 from pygeoapi.openapi import get_oas
 
 
+def _env_first(*names, default=None):
+    for name in names:
+        value = os.environ.get(name)
+        if value not in (None, ""):
+            return value
+    return default
+
+
 def _provider_table_reference(schema_name, table_name):
     normalized_schema = (schema_name or "").strip()
     normalized_table = (table_name or "").strip()
@@ -66,12 +74,16 @@ def build_pygeoapi_resources_from_catalog():
                     "type": "feature",
                     "name": "PostgreSQL",
                     "data": {
-                        "host": os.environ.get("DB_HOST", "127.0.0.1"),
-                        "port": os.environ.get("DB_PORT", "5432"),
-                        "dbname": os.environ.get("DB_NAME")
-                        or os.environ.get("DB_DATABASE", "postgres"),
-                        "user": os.environ.get("DB_USER", "postgres"),
-                        "password": os.environ.get("DB_PASSWORD", ""),
+                        "host": _env_first("POSTGRES_HOST", "DB_HOST", default="127.0.0.1"),
+                        "port": _env_first("POSTGRES_PORT", "DB_PORT", default="5432"),
+                        "dbname": _env_first(
+                            "POSTGRES_DB",
+                            "DB_NAME",
+                            "DB_DATABASE",
+                            default="postgres",
+                        ),
+                        "user": _env_first("POSTGRES_USER", "DB_USER", default="postgres"),
+                        "password": _env_first("POSTGRES_PASSWORD", "DB_PASSWORD", default=""),
                         "search_path": [provider_schema, "public"],
                     },
                     "table": provider_table,

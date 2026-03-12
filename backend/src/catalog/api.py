@@ -113,6 +113,7 @@ class DatasetViewSet(viewsets.ReadOnlyModelViewSet):
 
 class ResourceViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Resource.objects.select_related("dataset").prefetch_related(
+        "dataset__tags",
         "file_items",
         "tables",
         "api_items",
@@ -130,15 +131,19 @@ class ResourceViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="filter-options")
     def filter_options(self, request):
+        tags = DatasetTag.objects.filter(
+            tagged_items__content_object__resources__published=True
+        ).distinct().order_by("name")
+
         return Response(
             {
                 "resource_kinds": [
                     {"value": value, "label": label}
                     for value, label in Resource.ResourceKind.choices
                 ],
-                "processing_statuses": [
-                    {"value": value, "label": label}
-                    for value, label in Resource.ProcessingStatus.choices
+                "tags": [
+                    {"id": tag.id, "name": tag.name, "slug": tag.slug}
+                    for tag in tags
                 ],
             }
         )

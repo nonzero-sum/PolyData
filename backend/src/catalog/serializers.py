@@ -157,6 +157,7 @@ class ResourceAPISerializer(serializers.ModelSerializer):
 class ResourceSerializer(serializers.ModelSerializer):
     api_url = serializers.SerializerMethodField()
     is_geospatial = serializers.ReadOnlyField()
+    dataset_tags = serializers.SerializerMethodField()
     file_representation = ResourceFileSerializer(read_only=True)
     tables = ResourceTableSerializer(many=True, read_only=True)
     api_representation = ResourceAPISerializer(read_only=True)
@@ -166,6 +167,7 @@ class ResourceSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "dataset",
+            "dataset_tags",
             "title",
             "slug",
             "description",
@@ -175,8 +177,6 @@ class ResourceSerializer(serializers.ModelSerializer):
             "is_geospatial",
             "metadata",
             "published",
-            "processing_status",
-            "processing_message",
             "processed_at",
             "file_representation",
             "tables",
@@ -190,8 +190,6 @@ class ResourceSerializer(serializers.ModelSerializer):
             "is_geospatial",
             "storage_kind",
             "media_type",
-            "processing_status",
-            "processing_message",
             "processed_at",
             "created_at",
             "updated_at",
@@ -202,6 +200,11 @@ class ResourceSerializer(serializers.ModelSerializer):
         if request is None:
             return f"/api/resources/{obj.pk}/"
         return request.build_absolute_uri(f"/api/resources/{obj.pk}/")
+
+    def get_dataset_tags(self, obj):
+        if not getattr(obj, "dataset_id", None):
+            return []
+        return list(obj.dataset.tags.values_list("name", flat=True))
 
 
 class DatasetSerializer(serializers.ModelSerializer):

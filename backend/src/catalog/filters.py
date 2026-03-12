@@ -27,11 +27,18 @@ class DatasetFilter(django_filters.FilterSet):
 class ResourceFilter(django_filters.FilterSet):
     dataset = django_filters.NumberFilter(field_name="dataset_id")
     type = django_filters.CharFilter(field_name="resource_kind", lookup_expr="iexact")
+    tag = django_filters.CharFilter(method="filter_tag")
     geospatial = django_filters.BooleanFilter(method="filter_geospatial")
 
     class Meta:
         model = Resource
-        fields = ["dataset", "type", "geospatial", "processing_status"]
+        fields = ["dataset", "type", "tag", "geospatial"]
+
+    def filter_tag(self, queryset, _name, value):
+        normalized_value = (value or "").strip()
+        if not normalized_value:
+            return queryset
+        return queryset.filter(dataset__tags__slug__iexact=normalized_value).distinct()
 
     def filter_geospatial(self, queryset, _name, value):
         if value is None:
