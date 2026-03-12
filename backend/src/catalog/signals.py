@@ -5,7 +5,7 @@ from django.dispatch import receiver
 
 from .models import Dataset, Resource, ResourceAPI, ResourceFile, ResourceTable
 from .pygeoapi import sync_pygeoapi_settings
-from .services import drop_resource_table_storage, process_resource
+from ingestion.services import drop_resource_table_storage, process_resource
 
 
 def _resource_has_processing_source(resource):

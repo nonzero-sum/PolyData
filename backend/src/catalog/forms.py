@@ -7,7 +7,7 @@ from wagtail.documents.forms import BaseDocumentForm
 
 from .file_formats import allowed_upload_extensions_accept, validate_allowed_upload
 from .models import Dataset, Resource
-from .services import suggest_resource_kind_from_document
+from ingestion.services import suggest_resource_kind_from_document
 
 
 class CatalogDocumentForm(BaseDocumentForm):

@@ -12,7 +12,7 @@ from .serializers import (
     ResourceSerializer,
     ResourceTableSerializer,
 )
-from .services import fetch_resource_table_rows, get_primary_resource_table
+from ingestion.services import fetch_resource_table_rows, get_primary_resource_table
 
 
 class OrganizationViewSet(viewsets.ReadOnlyModelViewSet):

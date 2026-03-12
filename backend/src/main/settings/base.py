@@ -149,14 +149,6 @@ INSTALLED_APPS = [
     # extras needed by Wagtail
     "taggit",
     "django.contrib.postgres",
-    # Unfold Admin
-    "unfold",  # before django.contrib.admin
-    "unfold.contrib.filters",  # optional, if special filters are needed
-    "unfold.contrib.forms",  # optional, if special form elements are needed
-    "unfold.contrib.inlines",  # optional, if special inlines are needed
-    "unfold.contrib.import_export",  # optional, if django-import-export package is used
-    "unfold.contrib.guardian",  # optional, if django-guardian package is used
-    "unfold.contrib.simple_history",  # optional, if django-simple-history package is used
     # Django Contrib
     "django.contrib.admin",
     "django.contrib.auth",
@@ -169,13 +161,13 @@ INSTALLED_APPS = [
     "drf_spectacular",
     # Pygeoapi
     "pygeoapi",
-    # Catalog
-    "catalog",
     # Auth
     "account",
     "oidc_provider",
-    # Main
-    "main",
+    # PolyData Apps
+    "main", # Main
+    "ingestion", # Ingestion
+    "catalog", # Data Catalog 
 ]
 
 if DEBUG:
