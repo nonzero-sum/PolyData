@@ -1,6 +1,8 @@
+from django.db.models import Prefetch
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from .models import Dataset, Organization, Resource, ResourceTable
@@ -18,26 +20,33 @@ from ingestion.services import fetch_resource_table_rows, get_primary_resource_t
 class OrganizationViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Organization.objects.all().order_by("title")
     serializer_class = OrganizationSerializer
+    permission_classes = [AllowAny]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().filter(datasets__resources__published=True).distinct()
         search = self.request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(title__icontains=search)
         return queryset
 
 
-class DatasetViewSet(viewsets.ModelViewSet):
+class DatasetViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Dataset.objects.select_related("organization", "license").all()
     serializer_class = DatasetSerializer
+    permission_classes = [AllowAny]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().filter(resources__published=True).distinct()
         if self.action == "retrieve":
             queryset = queryset.prefetch_related(
-                "resources__file_items",
-                "resources__tables",
-                "resources__api_items",
+                Prefetch(
+                    "resources",
+                    queryset=Resource.objects.filter(published=True).prefetch_related(
+                        "file_items",
+                        "tables",
+                        "api_items",
+                    ),
+                ),
             )
 
         search = self.request.query_params.get("search", "").strip()
@@ -51,12 +60,13 @@ class DatasetViewSet(viewsets.ModelViewSet):
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context["include_resources"] = self.action == "retrieve"
+        context["public_only"] = True
         return context
 
     @action(detail=True, methods=["get"])
     def resources(self, request, pk=None):
         dataset = self.get_object()
-        queryset = dataset.resources.all()
+        queryset = dataset.resources.filter(published=True)
 
         resource_type = request.query_params.get("type", "").strip()
         if resource_type:
@@ -73,16 +83,17 @@ class DatasetViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class ResourceViewSet(viewsets.ModelViewSet):
+class ResourceViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Resource.objects.select_related("dataset").prefetch_related(
         "file_items",
         "tables",
         "api_items",
     ).all()
     serializer_class = ResourceSerializer
+    permission_classes = [AllowAny]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().filter(published=True)
         dataset_id = self.request.query_params.get("dataset")
         resource_type = self.request.query_params.get("type", "").strip()
         geospatial = self.request.query_params.get("geospatial", "").strip().lower()

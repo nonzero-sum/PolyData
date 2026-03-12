@@ -8,6 +8,7 @@ from drf_spectacular.views import (
     SpectacularRedocView,
     SpectacularSwaggerView,
 )
+from rest_framework.permissions import AllowAny
 
 # wagtail
 from wagtail import urls as wagtail_urls
@@ -41,9 +42,19 @@ urlpatterns = [
     path("organizations/", OrganizationListView.as_view(), name="organization-list"),
     path("organizations/<slug:slug>/", OrganizationDetailView.as_view(), name="organization-detail"),
     # OpenAPI Schema
-    path("api/schema/swagger-ui/", SpectacularSwaggerView.as_view(url_name="schema")),
-    path("api/schema/redoc/", SpectacularRedocView.as_view(url_name="schema")),
-    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
+    path(
+        "api/schema/swagger-ui/",
+        SpectacularSwaggerView.as_view(url_name="schema", permission_classes=[AllowAny]),
+    ),
+    path(
+        "api/schema/redoc/",
+        SpectacularRedocView.as_view(url_name="schema", permission_classes=[AllowAny]),
+    ),
+    path(
+        "api/schema/",
+        SpectacularAPIView.as_view(permission_classes=[AllowAny]),
+        name="schema",
+    ),
     # API
     path("api/", include(api_urls)),
     # Admin

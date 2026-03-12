@@ -205,7 +205,7 @@ class ResourceSerializer(serializers.ModelSerializer):
 
 
 class DatasetSerializer(serializers.ModelSerializer):
-    resources = ResourceSerializer(many=True, read_only=True)
+    resources = serializers.SerializerMethodField()
     dublin_core = serializers.SerializerMethodField()
     metadata = serializers.SerializerMethodField()
     tags = TagNameListField(required=False)
@@ -266,6 +266,16 @@ class DatasetSerializer(serializers.ModelSerializer):
 
     def get_metadata(self, obj):
         return obj.metadata
+
+    def get_resources(self, obj):
+        queryset = obj.resources.all()
+        if self.context.get("public_only", False):
+            queryset = queryset.filter(published=True)
+        return ResourceSerializer(
+            queryset,
+            many=True,
+            context=self.context,
+        ).data
 
     def create(self, validated_data):
         tags = validated_data.pop("tags", [])

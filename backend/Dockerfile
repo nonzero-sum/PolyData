@@ -1,4 +1,4 @@
-FROM python:3.13-alpine
+FROM python:3.14-alpine
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 ENV PYTHONUNBUFFERED=1
@@ -19,4 +19,4 @@ WORKDIR /app/src
 RUN uv run manage.py collectstatic --noinput
 
 ENTRYPOINT ["sh","/app/entrypoint.sh"]
-CMD ["uv", "run", "gunicorn","--bind", ":8000", "main.wsgi:application"]
+CMD ["uv", "run", "gunicorn","--bind", ":8000", "src.main.wsgi:application"]
