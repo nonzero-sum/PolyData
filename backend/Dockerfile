@@ -17,13 +17,13 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --no-install-project
+#RUN --mount=type=cache,id=s/PolyDataBackend-/root/.cache/uv,target=/root/.cache/uv \
+RUN    uv sync --locked --no-dev --no-install-project
 
 COPY . .
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev
+#RUN --mount=type=cache,id=s/PolyDataBackend-/root/.cache/uv,target=/root/.cache/uv \
+RUN    uv sync --locked --no-dev
 
 ENTRYPOINT ["sh", "/app/entrypoint.sh"]
 CMD ["uv", "run", "--no-sync", "gunicorn", "--bind", ":8000", "main.wsgi:application", "--workers", "8", "--timeout", "0"]

@@ -15,9 +15,13 @@
   </div>
 </template>
 
-<script setup>
-const swaggerUrl = '/api/schema/swagger-ui/'
-const loginUrl = '/dms/'
+<script setup lang="ts">
+const config = useRuntimeConfig()
+const backendUrl = config.public?.backendUrl ?? config.backendUrl ?? 'http://127.0.0.1:8000'
+
+const swaggerUrl = new URL('/api/schema/swagger-ui/', backendUrl).toString()
+const loginUrl = new URL('/dms/', backendUrl).toString()
+
 </script>
 
 <style>
