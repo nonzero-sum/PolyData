@@ -38,6 +38,14 @@ def _env_list(name, default=None):
     return items or (default or [])
 
 
+def _env_first(*names, default=None):
+    for name in names:
+        value = os.environ.get(name)
+        if value not in (None, ""):
+            return value
+    return default
+
+
 def _env_bbox(name, default=None):
     default = default or [-180.0, -90.0, 180.0, 90.0]
     raw_value = os.environ.get(name, "").strip()
@@ -159,6 +167,7 @@ INSTALLED_APPS = [
     # DRF
     "rest_framework",
     "django_filters",
+    "corsheaders",
     "drf_spectacular",
     # Pygeoapi
     "pygeoapi",
@@ -182,6 +191,7 @@ if DEBUG:
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "catalog.middleware.PygeoapiBootstrapMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -221,12 +231,11 @@ GEOS_LIBRARY_PATH = os.environ.get("GEOS_LIBRARY_PATH", "/usr/lib/libgeos_c.so")
 DATABASES = {
     "default": {
         "ENGINE": "django.contrib.gis.db.backends.postgis",
-        "USER": os.environ.get("DB_USER"),
-        "PASSWORD": os.environ.get("DB_PASSWORD"),
-        # support either DB_NAME or DB_DATABASE for compatibility with .env
-    "NAME": os.environ.get("DB_NAME") or os.environ.get("DB_DATABASE"),
-        "HOST": os.environ.get("DB_HOST"),
-        "PORT": os.environ.get("DB_PORT"),
+        "USER": _env_first("POSTGRES_USER", "DB_USER"),
+        "PASSWORD": _env_first("POSTGRES_PASSWORD", "DB_PASSWORD"),
+        "NAME": _env_first("POSTGRES_DB", "DB_NAME", "DB_DATABASE"),
+        "HOST": _env_first("POSTGRES_HOST", "DB_HOST"),
+        "PORT": _env_first("POSTGRES_PORT", "DB_PORT"),
         "TEST": {
             "NAME": "test",
         },
@@ -317,11 +326,11 @@ def _build_pygeoapi_resources():
         "type": "feature",
         "name": "PostgreSQL",
         "data": {
-            "host": os.environ.get("DB_HOST", "127.0.0.1"),
-            "port": os.environ.get("DB_PORT", "5432"),
-            "dbname": os.environ.get("DB_NAME") or os.environ.get("DB_DATABASE", "postgres"),
-            "user": os.environ.get("DB_USER", "postgres"),
-            "password": os.environ.get("DB_PASSWORD", ""),
+            "host": _env_first("POSTGRES_HOST", "DB_HOST", default="127.0.0.1"),
+            "port": _env_first("POSTGRES_PORT", "DB_PORT", default="5432"),
+            "dbname": _env_first("POSTGRES_DB", "DB_NAME", "DB_DATABASE", default="postgres"),
+            "user": _env_first("POSTGRES_USER", "DB_USER", default="postgres"),
+            "password": _env_first("POSTGRES_PASSWORD", "DB_PASSWORD", default=""),
             "search_path": _env_list(
                 "PYGEOAPI_DB_SEARCH_PATH",
                 default=[table_schema, "public"],
@@ -467,10 +476,18 @@ API_RULES = get_api_rules(PYGEOAPI_CONFIG)
 OPENAPI_DOCUMENT = get_oas(PYGEOAPI_CONFIG)
 APPEND_SLASH = not API_RULES.strict_slashes
 
-if PYGEOAPI_CONFIG["server"].get("cors", False) and _module_available("corsheaders"):
-    INSTALLED_APPS.append("corsheaders")
-    MIDDLEWARE.insert(0, "corsheaders.middleware.CorsMiddleware")
-    CORS_ORIGIN_ALLOW_ALL = True
+CORS_ALLOWED_ORIGINS = [
+    origin
+    for origin in [
+        FRONTEND_URL.strip().rstrip("/"),
+        *[
+            origin.strip().rstrip("/")
+            for origin in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
+        ],
+    ]
+    if origin
+]
+CORS_ALLOW_CREDENTIALS = True
 
 ######################################################################
 # Staticfiles

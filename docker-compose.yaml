@@ -1,19 +1,16 @@
 services:
   db:
-    image: postgis/postgis:17-3.6-alpine
-    #expose:
-    #  - "5432"
-    #ports:
-    #  - "5432:5432"
+    image: paradedb/paradedb:latest
+    expose:
+      - "5432"
+    ports:
+      - "5432:5432"
     volumes:
       - db:/var/lib/postgresql/data
-    environment:
-      PGPASSWORD: "${DB_PASSWORD:-secret}"
-      POSTGRES_DB: "${DB_DATABASE}"
-      POSTGRES_USER: "${DB_USER}"
-      POSTGRES_PASSWORD: "${DB_PASSWORD:-secret}"
+    env_file:
+      - backend/.env
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
       interval: 2s
       timeout: 2s
       retries: 10
@@ -42,7 +39,9 @@ services:
     volumes:
       - backend:/app
     env_file:
-      - .env
+      - backend/.env
+    environment:
+      POSTGRES_HOST: db
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 2s
@@ -53,28 +52,35 @@ services:
         condition: service_healthy
     networks:
       - django-liberty
-  #frontend:
-  #  build:
-  #    context: frontend-next
-  #  command: ["bun", "run", "dev"]
-  #  expose:
-  #    - "3000"
-  #  ports:
-  #    - "3000:3000"
-  #volumes:
-  #  - frontend:/app
-  #  env_file:
-  #    - .env.frontend
-  #  healthcheck:
-  #    test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-  #    interval: 2s
-  #    timeout: 2s
-  #    retries: 10
-  #   depends_on:
-  #     backend:
-  #       condition: service_healthy
-  #   networks:
-  #     - django-liberty
+  frontend:
+    build:
+      context: frontend-next
+    command: ["bun", "run", "dev"]
+    expose:
+      - "3000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - frontend:/app
+    #env_file:
+    #  - frontend/.env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - django-liberty
+
+  valkey:
+    image: valkey/valkey:latest
+    ports:
+      - "8080:8080"
+    networks:
+      - django-liberty
 
 networks:
   django-liberty:
@@ -83,4 +89,4 @@ networks:
 volumes:
   backend:
   db:
-  #frontend:
+  frontend:

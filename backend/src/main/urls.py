@@ -19,28 +19,8 @@ from wagtail.documents import urls as wagtaildocs_urls
 from pygeoapi.django_ import urls as pygeoapi_urls
 
 from api import urls as api_urls
-from .views import (
-    DatasetDetailView,
-    DatasetListView,
-    HomeView,
-    OrganizationDetailView,
-    OrganizationListView,
-    ResourceDetailView,
-    ResourceListView,
-)
 
 urlpatterns = [
-    path("", HomeView.as_view(), name="home"),
-    path("datasets/", DatasetListView.as_view(), name="dataset-list"),
-    path("resources/", ResourceListView.as_view(), name="resource-list"),
-    path("datasets/<slug:slug>/", DatasetDetailView.as_view(), name="dataset-detail"),
-    path(
-        "datasets/<slug:dataset_slug>/resources/<slug:resource_slug>/",
-        ResourceDetailView.as_view(),
-        name="resource-detail",
-    ),
-    path("organizations/", OrganizationListView.as_view(), name="organization-list"),
-    path("organizations/<slug:slug>/", OrganizationDetailView.as_view(), name="organization-detail"),
     # OpenAPI Schema
     path(
         "api/schema/swagger-ui/",
