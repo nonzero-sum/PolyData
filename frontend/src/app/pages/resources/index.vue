@@ -54,7 +54,7 @@ import { computed, ref, watch } from 'vue'
 const resources = ref([])
 const route = useRoute()
 const router = useRouter()
-const config = useRuntimeConfig()
+const apiBaseUrl = useApiBaseUrl()
 const searchTerm = ref(typeof route.query.search === 'string' ? route.query.search : '')
 const selectedType = ref(typeof route.query.type === 'string' ? route.query.type : '')
 const selectedTag = ref(typeof route.query.tag === 'string' ? route.query.tag : '')
@@ -76,8 +76,7 @@ function formatLabel(value) {
 }
 
 async function fetchResources() {
-    const base = config.public.backendUrl || 'http://localhost:8000'
-    const url = new URL(`${base}/api/resources/`)
+    const url = new URL(`${apiBaseUrl}/resources/`)
     const query = typeof route.query.search === 'string' ? route.query.search.trim() : ''
     searchTerm.value = query
     selectedType.value = typeof route.query.type === 'string' ? route.query.type : ''
@@ -97,8 +96,7 @@ async function fetchResources() {
 }
 
 async function fetchFilterOptions() {
-    const base = config.public.backendUrl || 'http://localhost:8000'
-    const res = await fetch(`${base}/api/resources/filter-options/`)
+    const res = await fetch(`${apiBaseUrl}/resources/filter-options/`)
     if (!res.ok) return
     const data = await res.json()
     filterOptions.value = {

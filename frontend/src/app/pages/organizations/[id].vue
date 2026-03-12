@@ -42,7 +42,7 @@ import { computed, ref, watch } from 'vue'
 const organization = ref(null)
 const datasets = ref([])
 const route = useRoute()
-const config = useRuntimeConfig()
+const apiBaseUrl = useApiBaseUrl()
 const organizationDatasets = computed(() => Array.isArray(datasets.value) ? datasets.value : [])
 
 function formatLabel(value) {
@@ -51,8 +51,7 @@ function formatLabel(value) {
 }
 
 async function fetchOrganization() {
-    const base = config.public.backendUrl || 'http://localhost:8000'
-    const organizationResponse = await fetch(`${base}/api/organizations/${route.params.id}/`)
+    const organizationResponse = await fetch(`${apiBaseUrl}/organizations/${route.params.id}/`)
     organization.value = organizationResponse.ok ? await organizationResponse.json() : null
 
     if (!organization.value?.slug) {
@@ -60,7 +59,7 @@ async function fetchOrganization() {
         return
     }
 
-    const datasetsUrl = new URL(`${base}/api/datasets/`)
+    const datasetsUrl = new URL(`${apiBaseUrl}/datasets/`)
     datasetsUrl.searchParams.set('organization', organization.value.slug)
     const datasetsResponse = await fetch(datasetsUrl.toString())
     if (datasetsResponse.ok) {

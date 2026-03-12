@@ -31,7 +31,7 @@ const datasetCount = ref(0)
 const resourceCount = ref(0)
 const organizationCount = ref(0)
 const router = useRouter()
-const config = useRuntimeConfig()
+const apiBaseUrl = useApiBaseUrl()
 
 function normalizeCount(payload) {
     if (typeof payload?.count === 'number') return payload.count
@@ -40,11 +40,10 @@ function normalizeCount(payload) {
 }
 
 async function fetchCounts() {
-    const base = config.public.backendUrl || 'http://127.0.0.1:8000'
     const [datasetsResponse, resourcesResponse, organizationsResponse] = await Promise.allSettled([
-        fetch(`${base}/api/datasets/`),
-        fetch(`${base}/api/resources/`),
-        fetch(`${base}/api/organizations/`),
+        fetch(`${apiBaseUrl}/datasets/`),
+        fetch(`${apiBaseUrl}/resources/`),
+        fetch(`${apiBaseUrl}/organizations/`),
     ])
 
     const datasetsPayload =

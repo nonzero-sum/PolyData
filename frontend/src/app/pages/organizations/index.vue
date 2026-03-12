@@ -36,7 +36,7 @@ import { computed, ref, watch } from 'vue'
 const organizations = ref([])
 const route = useRoute()
 const router = useRouter()
-const config = useRuntimeConfig()
+const apiBaseUrl = useApiBaseUrl()
 const searchTerm = ref(typeof route.query.search === 'string' ? route.query.search : '')
 const selectedOrdering = ref(typeof route.query.ordering === 'string' ? route.query.ordering : 'title')
 const organizationItems = computed(() => Array.isArray(organizations.value) ? organizations.value : [])
@@ -47,8 +47,7 @@ const orderingOptions = [
 ]
 
 async function fetchOrganizations() {
-    const base = config.public.backendUrl || 'http://localhost:8000'
-    const url = new URL(`${base}/api/organizations/`)
+    const url = new URL(`${apiBaseUrl}/organizations/`)
     const query = typeof route.query.search === 'string' ? route.query.search.trim() : ''
     searchTerm.value = query
     selectedOrdering.value = typeof route.query.ordering === 'string' ? route.query.ordering : 'title'

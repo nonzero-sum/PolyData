@@ -16,10 +16,8 @@
 </template>
 
 <script setup>
-const config = useRuntimeConfig()
-const backendBaseUrl = computed(() => (config.public.backendUrl || 'http://localhost:8000').replace(/\/$/, ''))
-const swaggerUrl = computed(() => `${backendBaseUrl.value}/api/schema/swagger-ui/`)
-const loginUrl = computed(() => `${backendBaseUrl.value}/dms/`)
+const swaggerUrl = '/api/schema/swagger-ui/'
+const loginUrl = '/dms/'
 </script>
 
 <style>

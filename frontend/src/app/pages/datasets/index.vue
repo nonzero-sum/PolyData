@@ -60,7 +60,7 @@ import { computed, ref, watch } from 'vue'
 const datasets = ref([])
 const route = useRoute()
 const router = useRouter()
-const config = useRuntimeConfig()
+const apiBaseUrl = useApiBaseUrl()
 const searchTerm = ref(typeof route.query.search === 'string' ? route.query.search : '')
 const selectedOrganization = ref(typeof route.query.organization === 'string' ? route.query.organization : '')
 const selectedTag = ref(typeof route.query.tag === 'string' ? route.query.tag : '')
@@ -84,8 +84,7 @@ function formatFrequency(value) {
 }
 
 async function fetchData() {
-    const base = config.public.backendUrl || 'http://localhost:8000'
-    const url = new URL(`${base}/api/datasets/`)
+    const url = new URL(`${apiBaseUrl}/datasets/`)
     const query = typeof route.query.search === 'string' ? route.query.search.trim() : ''
     searchTerm.value = query
     selectedOrganization.value = typeof route.query.organization === 'string' ? route.query.organization : ''
@@ -107,8 +106,7 @@ async function fetchData() {
 }
 
 async function fetchFilterOptions() {
-    const base = config.public.backendUrl || 'http://localhost:8000'
-    const res = await fetch(`${base}/api/datasets/filter-options/`)
+    const res = await fetch(`${apiBaseUrl}/datasets/filter-options/`)
     if (!res.ok) return
     const data = await res.json()
     filterOptions.value = {

@@ -23,6 +23,7 @@ dependencies = [
     "pyyaml>=6.0",
     "pygeoapi>=0.23.0",
     "geoalchemy2>=0.18.4",
+    "redis>=7.3.0",
 ]
 
 [tool.ruff]

@@ -61,7 +61,7 @@ import { ref, watch } from 'vue'
 
 const resource = ref(null)
 const route = useRoute()
-const config = useRuntimeConfig()
+const apiBaseUrl = useApiBaseUrl()
 
 function formatLabel(value) {
     if (!value) return 'Unknown'
@@ -69,8 +69,7 @@ function formatLabel(value) {
 }
 
 async function fetchResource() {
-    const base = config.public.backendUrl || 'http://localhost:8000'
-    const res = await fetch(`${base}/api/resources/${route.params.id}/`)
+    const res = await fetch(`${apiBaseUrl}/resources/${route.params.id}/`)
     resource.value = res.ok ? await res.json() : null
 }
 

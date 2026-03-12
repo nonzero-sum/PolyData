@@ -58,7 +58,7 @@ import { ref, watch } from 'vue'
 
 const dataset = ref(null)
 const route = useRoute()
-const config = useRuntimeConfig()
+const apiBaseUrl = useApiBaseUrl()
 
 function formatLabel(value) {
     if (!value) return 'Unknown'
@@ -66,8 +66,7 @@ function formatLabel(value) {
 }
 
 async function fetchDataset() {
-    const base = config.public.backendUrl || 'http://localhost:8000'
-    const res = await fetch(`${base}/api/datasets/${route.params.id}/`)
+    const res = await fetch(`${apiBaseUrl}/datasets/${route.params.id}/`)
     dataset.value = res.ok ? await res.json() : null
 }
 
