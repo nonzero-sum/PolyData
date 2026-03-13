@@ -1,6 +1,9 @@
 # Build stage
 FROM oven/bun:latest AS builder
 
+ARG BACKEND_URL
+ARG NUXT_URL
+
 WORKDIR /app
 
 # Copy package files
