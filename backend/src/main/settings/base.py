@@ -15,14 +15,49 @@ from pygeoapi.util import get_api_rules
 ######################################################################
 
 def _clean_host(value):
+    """Returns just the host portion (no scheme, no port).
+
+    Django's ALLOWED_HOSTS expects hostnames only, so we strip scheme and port.
+    """
+
     if not value:
         return ""
-    # strip scheme and trailing slashes
-    host = value.replace("http://", "").replace("https://", "").strip().strip("/")
-    # drop port if present (e.g. localhost:8000 -> localhost)
-    if ":" in host:
-        host = host.split(":", 1)[0]
-    return host
+
+    # urlsplit handles host/port cleanly even if scheme is missing.
+    parsed = urlsplit(value if "://" in value else f"//{value}")
+    return parsed.hostname or ""
+
+
+def _ensure_scheme(value, default_scheme="https"):
+    """Ensure a value has a scheme (http/https).
+
+    Many deployment environments may provide only a hostname (e.g. "example.com").
+    Django requires a full origin (e.g. "https://example.com") for CSRF_TRUSTED_ORIGINS.
+    """
+
+    if not value:
+        return value
+
+    value = value.strip()
+    parsed = urlsplit(value)
+    if parsed.scheme:
+        return value
+
+    return f"{default_scheme}://{value}"
+
+
+def _normalize_url_path(value, default="/"):
+    """Normalize a URL path segment to ensure leading slash and no trailing slash."""
+
+    path = (value or "").strip()
+    if not path:
+        return default
+
+    if not path.startswith("/"):
+        path = "/" + path
+
+    # Keep "/" if that is the only path
+    return path.rstrip("/") or "/"
 
 
 def _env_bool(name, default=False):
@@ -36,14 +71,6 @@ def _env_list(name, default=None):
     value = os.environ.get(name, "")
     items = [item.strip() for item in value.split(",") if item.strip()]
     return items or (default or [])
-
-
-def _env_first(*names, default=None):
-    for name in names:
-        value = os.environ.get(name)
-        if value not in (None, ""):
-            return value
-    return default
 
 
 def _env_bbox(name, default=None):
@@ -63,22 +90,6 @@ def _env_bbox(name, default=None):
     return values
 
 
-def _module_available(module_name):
-    return importlib.util.find_spec(module_name) is not None
-
-
-def _normalize_url_path(value, default="/"):
-    normalized_value = (value or "").strip()
-    if not normalized_value:
-        normalized_value = default
-
-    stripped_value = normalized_value.strip("/")
-    if not stripped_value:
-        return "/"
-
-    return f"/{stripped_value}"
-
-
 def _join_base_url(base_url, path):
     normalized_base_url = (base_url or "").strip().rstrip("/")
     normalized_path = _normalize_url_path(path, default="/")
@@ -96,8 +107,8 @@ SECRET_KEY = os.environ.get("SECRET_KEY", get_random_secret_key())
 
 DEBUG = str(os.environ.get("DEBUG", "true")).lower() in ("1", "true", "yes", "on")
 
-SITE_URL = os.environ.get("DJANGO_URL", "http://localhost").strip()
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost").strip()
+SITE_URL = _ensure_scheme(os.environ.get("DJANGO_URL", "http://localhost").strip())
+FRONTEND_URL = _ensure_scheme(os.environ.get("FRONTEND_URL", "http://localhost").strip())
 
 ALLOWED_HOSTS = [
     host
@@ -112,10 +123,10 @@ ALLOWED_HOSTS = [
 CSRF_TRUSTED_ORIGINS = [
     origin
     for origin in [
-        SITE_URL.strip().rstrip("/"),
-        FRONTEND_URL.strip().rstrip("/"),
+        _ensure_scheme(SITE_URL).strip().rstrip("/"),
+        _ensure_scheme(FRONTEND_URL).strip().rstrip("/"),
         *[
-            origin.strip().rstrip("/")
+            _ensure_scheme(origin.strip().rstrip("/"))
             for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
         ],
     ]
@@ -231,11 +242,15 @@ GEOS_LIBRARY_PATH = os.environ.get("GEOS_LIBRARY_PATH", "/usr/lib/libgeos_c.so")
 DATABASES = {
     "default": {
         "ENGINE": "django.contrib.gis.db.backends.postgis",
-        "USER": _env_first("POSTGRES_USER", "DB_USER"),
-        "PASSWORD": _env_first("POSTGRES_PASSWORD", "DB_PASSWORD"),
-        "NAME": _env_first("POSTGRES_DB", "DB_NAME", "DB_DATABASE"),
-        "HOST": _env_first("POSTGRES_HOST", "DB_HOST"),
-        "PORT": _env_first("POSTGRES_PORT", "DB_PORT"),
+        "USER": os.environ.get("POSTGRES_USER") or os.environ.get("DB_USER"),
+        "PASSWORD": os.environ.get("POSTGRES_PASSWORD") or os.environ.get("DB_PASSWORD"),
+        "NAME": (
+            os.environ.get("POSTGRES_DB")
+            or os.environ.get("DB_NAME")
+            or os.environ.get("DB_DATABASE")
+        ),
+        "HOST": os.environ.get("POSTGRES_HOST") or os.environ.get("DB_HOST"),
+        "PORT": os.environ.get("POSTGRES_PORT") or os.environ.get("DB_PORT"),
         "TEST": {
             "NAME": "test",
         },
@@ -326,11 +341,16 @@ def _build_pygeoapi_resources():
         "type": "feature",
         "name": "PostgreSQL",
         "data": {
-            "host": _env_first("POSTGRES_HOST", "DB_HOST", default="127.0.0.1"),
-            "port": _env_first("POSTGRES_PORT", "DB_PORT", default="5432"),
-            "dbname": _env_first("POSTGRES_DB", "DB_NAME", "DB_DATABASE", default="postgres"),
-            "user": _env_first("POSTGRES_USER", "DB_USER", default="postgres"),
-            "password": _env_first("POSTGRES_PASSWORD", "DB_PASSWORD", default=""),
+            "host": os.environ.get("POSTGRES_HOST") or os.environ.get("DB_HOST") or "127.0.0.1",
+            "port": os.environ.get("POSTGRES_PORT") or os.environ.get("DB_PORT") or "5432",
+            "dbname": (
+                os.environ.get("POSTGRES_DB")
+                or os.environ.get("DB_NAME")
+                or os.environ.get("DB_DATABASE")
+                or "postgres"
+            ),
+            "user": os.environ.get("POSTGRES_USER") or os.environ.get("DB_USER") or "postgres",
+            "password": os.environ.get("POSTGRES_PASSWORD") or os.environ.get("DB_PASSWORD") or "",
             "search_path": _env_list(
                 "PYGEOAPI_DB_SEARCH_PATH",
                 default=[table_schema, "public"],
