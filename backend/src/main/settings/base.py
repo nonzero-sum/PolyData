@@ -67,6 +67,16 @@ def _env_bool(name, default=False):
     return str(value).lower() in ("1", "true", "yes", "on")
 
 
+def _env_int(name, default):
+    value = os.environ.get(name)
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
 def _env_list(name, default=None):
     value = os.environ.get(name, "")
     items = [item.strip() for item in value.split(",") if item.strip()]
@@ -178,6 +188,7 @@ INSTALLED_APPS = [
     # DRF
     "rest_framework",
     "django_filters",
+    "storages",
     "corsheaders",
     "drf_spectacular",
     # Search 
@@ -512,7 +523,7 @@ CORS_ALLOWED_ORIGINS = [
 CORS_ALLOW_CREDENTIALS = True
 
 ######################################################################
-# Staticfiles
+# Storages and Static/Media Files
 ######################################################################
 
 STATIC_ROOT = BASE_DIR / "static"
@@ -521,16 +532,62 @@ STATIC_URL = "/static/"
 MEDIA_ROOT = BASE_DIR / "media"
 MEDIA_URL = "/media/"
 
-######################################################################
-# Storages
-######################################################################
+USE_S3_STORAGE = _env_bool("S3_STORAGE_ENABLED", False)
 
-STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-    },
-}
+if not USE_S3_STORAGE:
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+else:
+    s3_bucket_name = os.environ.get("AWS_STORAGE_BUCKET_NAME", "").strip()
+    s3_endpoint_url = os.environ.get("AWS_S3_ENDPOINT_URL", "").strip() or None
+    s3_region_name = os.environ.get("AWS_S3_REGION_NAME", "").strip() or None
+    s3_custom_domain = os.environ.get("AWS_S3_CUSTOM_DOMAIN", "").strip() or None
+    s3_default_acl = os.environ.get("AWS_DEFAULT_ACL", "").strip() or None
+    s3_location = os.environ.get("AWS_LOCATION", "").strip()
+    s3_url_protocol = os.environ.get("AWS_S3_URL_PROTOCOL", "https:").strip() or "https:"
+
+    s3_options = {
+        "bucket_name": s3_bucket_name,
+        "access_key": os.environ.get("AWS_ACCESS_KEY_ID", "").strip() or None,
+        "secret_key": os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip() or None,
+        "security_token": os.environ.get("AWS_SESSION_TOKEN", "").strip() or None,
+        "region_name": s3_region_name,
+        "endpoint_url": s3_endpoint_url,
+        "custom_domain": s3_custom_domain,
+        "default_acl": s3_default_acl,
+        "querystring_auth": _env_bool("AWS_QUERYSTRING_AUTH", True),
+        "querystring_expire": _env_int("AWS_QUERYSTRING_EXPIRE", 3600),
+        "file_overwrite": _env_bool("AWS_S3_FILE_OVERWRITE", True),
+        "location": s3_location,
+        "url_protocol": s3_url_protocol,
+        "addressing_style": os.environ.get("AWS_S3_ADDRESSING_STYLE", "").strip() or None,
+    }
+    s3_options = {
+        option_name: option_value
+        for option_name, option_value in s3_options.items()
+        if option_value is not None
+    }
+
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": s3_options,
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+
+    media_url_override = os.environ.get("MEDIA_URL", "").strip()
+    if media_url_override:
+        MEDIA_URL = media_url_override
+    elif s3_custom_domain:
+        location_segment = f"/{s3_location.strip('/') }" if s3_location else ""
+        MEDIA_URL = f"{s3_url_protocol}//{s3_custom_domain}{location_segment}/"
 
 ######################################################################
 # Caches
