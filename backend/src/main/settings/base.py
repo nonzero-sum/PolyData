@@ -180,6 +180,8 @@ INSTALLED_APPS = [
     "django_filters",
     "corsheaders",
     "drf_spectacular",
+    # Search 
+    "paradedb",
     # Pygeoapi
     "pygeoapi",
     # Auth

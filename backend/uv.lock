@@ -222,6 +222,18 @@ wheels = [
 ]
 
 [[package]]
+name = "django-paradedb"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cb/ab/451d4aa0807b22f2f3ea2a33931a8964a348fd8ad2af7ec2de7ec60701e6/django_paradedb-0.4.0.tar.gz", hash = "sha256:973687b844acdaeae3a962988c27eb6476443e0ff8b8e66841cb98e939ed5918", size = 245563, upload-time = "2026-03-03T02:54:36.853Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6e/79/05814cea957701309aa0f55d7858716c9e4ec0f653cf80b95b7293fba321/django_paradedb-0.4.0-py3-none-any.whl", hash = "sha256:41d79990fc0284e723cfc7a946dd82e60341e5cee785cd2680990664cdddbdbc", size = 35493, upload-time = "2026-03-03T02:54:34.181Z" },
+]
+
+[[package]]
 name = "django-permissionedforms"
 version = "0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -739,6 +751,7 @@ dependencies = [
     { name = "django-cors-headers" },
     { name = "django-filter" },
     { name = "django-oidc-provider" },
+    { name = "django-paradedb" },
     { name = "django-unfold" },
     { name = "djangorestframework" },
     { name = "dotenv" },
@@ -762,6 +775,7 @@ requires-dist = [
     { name = "django-cors-headers", specifier = ">=4.7.0" },
     { name = "django-filter", specifier = ">=25.1" },
     { name = "django-oidc-provider", specifier = ">=0.8.4" },
+    { name = "django-paradedb", specifier = ">=0.4.0" },
     { name = "django-unfold", specifier = ">=0.74.1" },
     { name = "djangorestframework", specifier = ">=3.16.1" },
     { name = "dotenv", specifier = ">=0.9.9" },

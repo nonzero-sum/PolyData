@@ -37,14 +37,14 @@ class DatasetViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Dataset.objects.select_related("organization", "license").all()
     serializer_class = DatasetSerializer
     permission_classes = [AllowAny]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_class = DatasetFilter
-    search_fields = ["title", "description", "slug", "organization__title"]
     ordering_fields = ["title", "created_at", "updated_at", "update_frequency"]
     ordering = ["title"]
 
     def get_queryset(self):
         queryset = super().get_queryset().filter(resources__published=True).distinct()
+
         if self.action == "retrieve":
             queryset = queryset.prefetch_related(
                 Prefetch(
@@ -120,9 +120,8 @@ class ResourceViewSet(viewsets.ReadOnlyModelViewSet):
     ).all()
     serializer_class = ResourceSerializer
     permission_classes = [AllowAny]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_class = ResourceFilter
-    search_fields = ["title", "description", "slug", "dataset__title"]
     ordering_fields = ["title", "created_at", "updated_at", "processed_at"]
     ordering = ["title"]
 

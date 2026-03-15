@@ -24,6 +24,7 @@ dependencies = [
     "pygeoapi>=0.23.0",
     "geoalchemy2>=0.18.4",
     "redis>=7.3.0",
+    "django-paradedb>=0.4.0",
 ]
 
 [tool.ruff]

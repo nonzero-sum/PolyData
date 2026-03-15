@@ -12,6 +12,9 @@ from wagtail.documents import get_document_model_string
 from wagtail.log_actions import registry as log_action_registry
 from wagtail.snippets.models import register_snippet
 
+from paradedb.indexes import BM25Index
+from paradedb.queryset import ParadeDBManager
+
 from .file_formats import validate_allowed_upload
 from .metadata_schemas import DUBLIN_CORE_FIELDS, dublin_core_editable_fields
 
@@ -217,6 +220,10 @@ class Dataset(ClusterableModel):
     dc_relation = models.TextField(blank=True)
     dc_coverage = models.TextField(blank=True)
     tags = ClusterTaggableManager(through="catalog.DatasetTaggedItem", blank=True)
+
+    # ParadeDB full‑text search index (BM25)
+    objects = ParadeDBManager()
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -239,6 +246,19 @@ class Dataset(ClusterableModel):
 
     class Meta:
         ordering = ["title"]
+        indexes = [
+            BM25Index(
+                fields={
+                    "id": {},
+                    "title": {"tokenizer": "unicode_words"},
+                    "description": {"tokenizer": "unicode_words"},
+                    "dc_subject": {"tokenizer": "unicode_words"},
+                    "dc_description": {"tokenizer": "unicode_words"},
+                },
+                key_field="id",
+                name="dataset_search_idx",
+            ),
+        ]
 
     def __str__(self):
         return self.title
@@ -403,6 +423,7 @@ class Resource(ClusterableModel):
     )
     media_type = models.CharField(max_length=255, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
+    objects = ParadeDBManager()
     published = models.BooleanField(default=True)
     processing_status = models.CharField(
         max_length=16,
@@ -442,6 +463,19 @@ class Resource(ClusterableModel):
 
     class Meta:
         ordering = ["dataset__title", "title"]
+        indexes = [
+            BM25Index(
+                fields={
+                    "id": {},
+                    "title": {"tokenizer": "unicode_words"},
+                    "description": {"tokenizer": "unicode_words"},
+                    "media_type": {"tokenizer": "unicode_words"},
+                    "metadata": {},
+                },
+                key_field="id",
+                name="resource_search_idx",
+            ),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["dataset", "slug"],
