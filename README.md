@@ -1,26 +1,23 @@
-# PolyData 📦
+# PolyData
 
-A geospatial data portal built on Django, Wagtail and PygeoAPI.
+<img src="/backend/src/dashboard/static/logo.svg" alt="PolyData Logo" style="width: 128px;" />
 
-## Overview
-
-PolyData is a modular platform for ingesting, managing, and publishing
-geospatial datasets. Its architecture combines a Django backend with:
+PolyData is a modular platform for ingesting, managing, and publishing data built on Django, Wagtail and PygeoAPI. Its architecture combines a Django backend with:
 
 - Wagtail CMS for content and administration
-- Catalog API and OGC services (pygeoapi) on top of PostGIS
+- Catalog API, DRF for tabular data and Pygeoapi for geospatial services on top of Postgres with PostGIS and ParadeDB.
 - OpenID Connect authentication (OIDC) using `django-oidc-provider`
 - Internal apps (`account`, `catalog`, `ingestion`, `main`) containing
   business logic
-- Docker containers ready for development and deployment
+- Docker compose ready for production deployment
 
 ## Features
 
 - **OIDC authentication** for users and relying-party clients
-- **Unfold-themed admin** with user management
 - **REST API** with OpenAPI/Swagger (`drf-spectacular`)
 - **OGC API service** configurable via environment variables
 - **Data ingestion** leveraging PostGIS and GeoAlchemy
+- **Elastic quality search** with ParadeDB
 - **Flexible configuration** through env vars
 - **Docker Compose** orchestration of database and Django server
 
@@ -28,7 +25,7 @@ geospatial datasets. Its architecture combines a Django backend with:
 
 - Docker & Docker Compose
 - (Optional for local tasks) Python 3.14+
-- PostgreSQL with PostGIS extension (provided by the `database` container)
+- PostgreSQL with PostGIS and ParadeDB extension (provided by the `database` container)
 
 ## Quickstart
 
@@ -45,7 +42,7 @@ When running through Docker Compose, set the database host to the Compose servic
 
    ```bash
    cp backend/.env.example backend/.env
-   # adjust POSTGRES_*, SECRET_KEY, DJANGO_URL, FRONTEND_URL, etc.
+   cp frontend/.env.example frontend/.env
    ```
 
 3. Bring up the services:
@@ -54,7 +51,7 @@ When running through Docker Compose, set the database host to the Compose servic
    docker-compose up -d --build
    ```
 
-   This will start the `database` (PostGIS) and `backend` (Django/Gunicorn)
+   This will start the `database` (PostGIS and ParadeDB) and `backend` (Django/Gunicorn)
    containers.
 
    If you already have a local PostgreSQL volume created with the old
@@ -69,12 +66,12 @@ When running through Docker Compose, set the database host to the Compose servic
    ```
 
 5. Visit the key endpoints:
-   - Django admin: `http://localhost:8000/admin/`
-   - Wagtail admin: `http://localhost:8000/cms/` (if enabled)
-   - REST API: `http://localhost:8000/api/`
-   - PygeoAPI: `http://localhost:8000/geoapi/` (configurable via
+   - Django admin: `http://127.0.0.1:8000/admin/`
+   - Wagtail admin: `http://127.0.0.1:8000/cms/` (if enabled)
+   - REST API: `http://127.0.0.1:8000/api/`
+   - PygeoAPI: `http://127.0.0.1:8000/geoapi/` (configurable via
      `PYGEOAPI_BASE_PATH`)
-   - Swagger/OpenAPI: `http://localhost:8000/api/schema/swagger-ui/`
+   - Swagger/OpenAPI: `http://127.0.0.1:8000/api/schema/swagger-ui/`
 
 ## Development
 
@@ -87,7 +84,7 @@ uv run src/manage.py migrate
 uv run src/manage.py runserver 0.0.0.0:8000
 ```
 
-Python dependencies are managed with [UV](https://github.com/jazzband/uv):
+Python dependencies are managed with UV. To add a package:
 
 ```bash
 docker-compose exec backend uv add <package>
@@ -110,12 +107,6 @@ docker-compose exec backend uv add <package>
 - `PYGEOAPI_TABLE`, `PYGEOAPI_BASE_PATH`, `PYGEOAPI_TITLE`, etc.
 
 See `backend/src/main/settings/base.py` for the full list with comments.
-
-## Publishing geospatial data
-
-1. Load your table into PostGIS (schema `resource_data` by default).
-2. Set `PYGEOAPI_TABLE` pointing to `schema.table`.
-3. Access the OGC API service at the configured path (`/geoapi/`).
 
 ## Deployment
 

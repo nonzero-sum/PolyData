@@ -1,0 +1,16 @@
+{% extends "wagtailadmin/login.html" %}
+{% load static %}
+
+{% block above_login %}
+	<div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+		<img
+			src="{% static 'logo.svg' %}"
+			alt="PolyData"
+			width="128"
+			height="128"
+			style="display: block; width: clamp(4.5rem, 18vw, 8rem); height: auto; max-width: min(10rem, 40vw);"
+		/>
+	</div>
+{% endblock %}
+
+{% block branding_login %}Sign in to PolyData{% endblock %}

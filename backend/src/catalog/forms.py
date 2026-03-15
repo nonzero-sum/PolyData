@@ -7,8 +7,22 @@ from wagtail.documents import get_document_model
 from wagtail.documents.forms import BaseDocumentForm
 
 from .file_formats import allowed_upload_extensions_accept, validate_allowed_upload
+from .metadata_schemas import DUBLIN_CORE_FIELD_LABELS, dublin_core_editable_fields
 from .models import Dataset, DatasetTag, Resource
 from ingestion.services import suggest_resource_kind_from_document
+
+
+DUBLIN_CORE_WIDGET_CONFIG = {
+    "dc_subject": forms.TextInput,
+    "dc_description": lambda: forms.Textarea(attrs={"rows": 4}),
+    "dc_date": lambda: forms.DateInput(attrs={"type": "date"}),
+    "dc_type": forms.TextInput,
+    "dc_format": forms.TextInput,
+    "dc_source": forms.TextInput,
+    "dc_language": forms.TextInput,
+    "dc_relation": forms.TextInput,
+    "dc_coverage": forms.TextInput,
+}
 
 
 class CatalogDocumentForm(BaseDocumentForm):
@@ -49,6 +63,21 @@ class DatasetForm(WagtailAdminModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        for field_name, field_label in dublin_core_editable_fields():
+            field = self.fields.get(field_name)
+            if field is None:
+                continue
+
+            dc_field_name = field_name.removeprefix("dc_")
+            field.label = DUBLIN_CORE_FIELD_LABELS.get(dc_field_name, field_label)
+
+            widget_factory = DUBLIN_CORE_WIDGET_CONFIG.get(field_name)
+            if widget_factory is not None:
+                field.widget = widget_factory() if callable(widget_factory) else widget_factory()
+
+            if field_name == "dc_date":
+                field.help_text = "Use ISO 8601 format when possible, e.g. 2026-03-15."
 
         tags_field = self.fields.get("tags")
         if tags_field is None:

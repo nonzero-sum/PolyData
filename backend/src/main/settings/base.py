@@ -173,6 +173,7 @@ INSTALLED_APPS = [
     "wagtail.documents",
     "wagtail.images",
     "wagtail.search",  # core search backend
+    "dashboard",
     "wagtail.admin",
     "wagtail",
     # extras needed by Wagtail

@@ -22,6 +22,7 @@ DUBLIN_CORE_FIELDS = (
 DUBLIN_CORE_MANAGED_FIELDS = (
     "title",
     "creator",
+    "description",
     "publisher",
     "contributor",
     "identifier",

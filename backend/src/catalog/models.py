@@ -16,7 +16,11 @@ from paradedb.indexes import BM25Index
 from paradedb.queryset import ParadeDBManager
 
 from .file_formats import validate_allowed_upload
-from .metadata_schemas import DUBLIN_CORE_FIELDS, dublin_core_editable_fields
+from .metadata_schemas import (
+    DUBLIN_CORE_FIELDS,
+    DUBLIN_CORE_MANAGED_FIELDS,
+    dublin_core_editable_fields,
+)
 
 
 def _generate_unique_slug(model_class, source_value, instance_pk=None, parent_field=None):
@@ -277,7 +281,6 @@ class Dataset(ClusterableModel):
     def dublin_core_editor_values(self):
         return {
             "subject": self.dc_subject,
-            "description": self.dc_description or self.description,
             "date": self.dc_date,
             "type": self.dc_type,
             "format": self.dc_format,
@@ -319,6 +322,7 @@ class Dataset(ClusterableModel):
         return {
             "title": self.title,
             "creator": self.creator_display(fallback_user=fallback_user),
+            "description": self.dc_description or self.description,
             "publisher": self.organization,
             "contributor": ", ".join(self.contributor_names()),
             "identifier": self.slug,
@@ -370,7 +374,7 @@ class Dataset(ClusterableModel):
         return self.dublin_core.get("fields", {}).get(field_name, "")
 
     def set_dublin_core_value(self, field_name, value):
-        if field_name in {"title", "creator", "publisher", "contributor", "identifier", "rights"}:
+        if field_name in DUBLIN_CORE_MANAGED_FIELDS:
             return
         setattr(self, f"dc_{field_name}", value or "")
 
