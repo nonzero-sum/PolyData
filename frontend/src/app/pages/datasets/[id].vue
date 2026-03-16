@@ -53,25 +53,7 @@
                     </section>
 
                     <section>
-                        <p class="section-label">Timeline</p>
-                        <div class="facts-grid">
-                            <div class="fact-card">
-                                <span class="fact-label">Publicación</span>
-                                <span>{{ publicationDate }}</span>
-                            </div>
-                            <div class="fact-card">
-                                <span class="fact-label">Creación</span>
-                                <span>{{ creationDate }}</span>
-                            </div>
-                            <div class="fact-card fact-card-wide">
-                                <span class="fact-label">Actualización</span>
-                                <span>{{ modifiedDate }}</span>
-                            </div>
-                        </div>
-                    </section>
-
-                    <section v-if="detailFacts.length">
-                        <p class="section-label">Metadata</p>
+                        <p class="section-label">Dublin Core</p>
                         <div class="facts-grid">
                             <div v-for="fact in detailFacts" :key="fact.label" class="fact-card"
                                 :class="{ 'fact-card-wide': fact.wide }">
@@ -116,44 +98,39 @@ function formatDateTime(value) {
     return dateTimeFormatter.format(parsed)
 }
 
-const publicationDate = computed(() => {
-    const value = dataset.value?.metadata?.published
+function formatMetadataDate(value) {
     if (!value) return 'No definida'
-
     return formatDateTime(value)
-})
-
-const creationDate = computed(() => {
-    const value = dataset.value?.metadata?.created
-    if (!value) return 'No definida'
-
-    return formatDateTime(value)
-})
-
-const modifiedDate = computed(() => {
-    const value = dataset.value?.metadata?.modified
-    if (!value) return 'No definida'
-
-    return formatDateTime(value)
-})
+}
 
 const detailFacts = computed(() => {
     if (!dataset.value) return []
 
     const fields = dataset.value.metadata || {}
+    const subjectValue = Array.isArray(fields.subject) ? fields.subject.join(', ') : fields.subject
+    const rightsValue = fields.rights?.title || fields.rights?.code
     const items = [
-        { label: 'Tema', value: Array.isArray(fields.subject) ? fields.subject.join(', ') : fields.subject, wide: true },
-        { label: 'Tipo', value: fields.type },
-        { label: 'Idioma', value: fields.language },
-        { label: 'Cobertura', value: fields.coverage },
+        { label: 'Título', value: fields.title || dataset.value.title, wide: true },
+        { label: 'Identificador', value: fields.identifier || dataset.value.slug, wide: true },
+        { label: 'Tema', value: subjectValue, wide: true },
+        { label: 'Descripción', value: fields.description || dataset.value.description, wide: true },
         { label: 'Fuente', value: fields.source, wide: true },
+        { label: 'Publicación', value: formatMetadataDate(fields.published) },
+        { label: 'Tipo', value: fields.type },
+        { label: 'Actualización', value: formatMetadataDate(fields.modified) },
+        { label: 'Cobertura', value: fields.coverage },
         { label: 'Autor', value: fields.creator },
         { label: 'Editor', value: fields.publisher },
         { label: 'Colaboradores', value: fields.contributor, wide: true },
-        { label: 'Derechos', value: fields.rights?.title || fields.rights?.code, wide: true },
+        { label: 'Derechos', value: rightsValue, wide: true },
+        { label: 'Idioma', value: fields.language },
+        { label: 'Creación', value: formatMetadataDate(fields.created) },
     ]
 
-    return items.filter((item) => item.value)
+    return items.map((item) => ({
+        ...item,
+        value: item.value || 'No disponible',
+    }))
 })
 
 async function fetchDataset() {
