@@ -26,25 +26,60 @@
 
             <aside class="panel">
                 <h2>Metadata</h2>
-                <div class="facts">
-                    <div>
-                        <span class="fact-label">Organization</span>
-                        <NuxtLink v-if="dataset.organization" :to="`/organizations/${dataset.organization.id}`">{{
-                            dataset.organization.title }}</NuxtLink>
-                        <span v-else>Not assigned</span>
-                    </div>
-                    <div>
-                        <span class="fact-label">License</span>
-                        <span>{{ dataset.license?.title || 'Not assigned' }}</span>
-                    </div>
-                    <div>
-                        <span class="fact-label">Update Frequency</span>
-                        <span>{{ formatLabel(dataset.update_frequency) }}</span>
-                    </div>
-                    <div>
-                        <span class="fact-label">Slug</span>
-                        <span>{{ dataset.slug }}</span>
-                    </div>
+                <div class="metadata-sections">
+                    <section>
+                        <p class="section-label">Catalog</p>
+                        <div class="facts-grid">
+                            <div class="fact-card">
+                                <span class="fact-label">Organization</span>
+                                <NuxtLink v-if="dataset.organization" :to="`/organizations/${dataset.organization.id}`">
+                                    {{ dataset.organization.title }}
+                                </NuxtLink>
+                                <span v-else>Not assigned</span>
+                            </div>
+                            <div class="fact-card">
+                                <span class="fact-label">License</span>
+                                <span>{{ dataset.license?.title || 'Not assigned' }}</span>
+                            </div>
+                            <div class="fact-card">
+                                <span class="fact-label">Update Frequency</span>
+                                <span>{{ formatLabel(dataset.update_frequency) }}</span>
+                            </div>
+                            <div class="fact-card">
+                                <span class="fact-label">Identificador</span>
+                                <span>{{ dataset.metadata?.identifier || dataset.slug }}</span>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section>
+                        <p class="section-label">Timeline</p>
+                        <div class="facts-grid">
+                            <div class="fact-card">
+                                <span class="fact-label">Publicación</span>
+                                <span>{{ publicationDate }}</span>
+                            </div>
+                            <div class="fact-card">
+                                <span class="fact-label">Creación</span>
+                                <span>{{ creationDate }}</span>
+                            </div>
+                            <div class="fact-card fact-card-wide">
+                                <span class="fact-label">Actualización</span>
+                                <span>{{ modifiedDate }}</span>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section v-if="detailFacts.length">
+                        <p class="section-label">Metadata</p>
+                        <div class="facts-grid">
+                            <div v-for="fact in detailFacts" :key="fact.label" class="fact-card"
+                                :class="{ 'fact-card-wide': fact.wide }">
+                                <span class="fact-label">{{ fact.label }}</span>
+                                <span>{{ fact.value }}</span>
+                            </div>
+                        </div>
+                    </section>
                 </div>
             </aside>
         </section>
@@ -54,16 +89,72 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const dataset = ref(null)
 const route = useRoute()
 const apiBaseUrl = useApiBaseUrl()
 
+const dateTimeFormatter = new Intl.DateTimeFormat('es-MX', {
+    dateStyle: 'long',
+    timeStyle: 'short',
+})
+
 function formatLabel(value) {
     if (!value) return 'Unknown'
     return value.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 }
+
+function formatDateTime(value) {
+    if (!value) return 'No disponible'
+
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) {
+        return 'No disponible'
+    }
+
+    return dateTimeFormatter.format(parsed)
+}
+
+const publicationDate = computed(() => {
+    const value = dataset.value?.metadata?.published
+    if (!value) return 'No definida'
+
+    return formatDateTime(value)
+})
+
+const creationDate = computed(() => {
+    const value = dataset.value?.metadata?.created
+    if (!value) return 'No definida'
+
+    return formatDateTime(value)
+})
+
+const modifiedDate = computed(() => {
+    const value = dataset.value?.metadata?.modified
+    if (!value) return 'No definida'
+
+    return formatDateTime(value)
+})
+
+const detailFacts = computed(() => {
+    if (!dataset.value) return []
+
+    const fields = dataset.value.metadata || {}
+    const items = [
+        { label: 'Tema', value: Array.isArray(fields.subject) ? fields.subject.join(', ') : fields.subject, wide: true },
+        { label: 'Tipo', value: fields.type },
+        { label: 'Idioma', value: fields.language },
+        { label: 'Cobertura', value: fields.coverage },
+        { label: 'Fuente', value: fields.source, wide: true },
+        { label: 'Autor', value: fields.creator },
+        { label: 'Editor', value: fields.publisher },
+        { label: 'Colaboradores', value: fields.contributor, wide: true },
+        { label: 'Derechos', value: fields.rights?.title || fields.rights?.code, wide: true },
+    ]
+
+    return items.filter((item) => item.value)
+})
 
 async function fetchDataset() {
     const res = await fetch(`${apiBaseUrl}/datasets/${route.params.id}/`)
@@ -124,6 +215,38 @@ h1 {
     gap: 12px;
 }
 
+.metadata-sections {
+    display: grid;
+    gap: 18px;
+}
+
+.section-label {
+    margin: 0 0 10px;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.facts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.fact-card {
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.58);
+}
+
+.fact-card-wide {
+    grid-column: 1 / -1;
+}
+
 .fact-label {
     display: block;
     color: var(--muted);
@@ -182,6 +305,10 @@ h1 {
 
 @media (max-width: 860px) {
     .layout {
+        grid-template-columns: 1fr;
+    }
+
+    .facts-grid {
         grid-template-columns: 1fr;
     }
 }

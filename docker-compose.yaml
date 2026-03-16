@@ -52,7 +52,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      BACKEND_URL: ${BACKEND_URL:-http://backend:8000}
+      BACKEND_URL: ${BACKEND_URL:-http://127.0.0.1:8000}
       NUXT_URL: ${NUXT_URL:-http://127.0.0.1:3000}
     healthcheck:
       test:

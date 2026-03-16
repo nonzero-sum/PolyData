@@ -34,7 +34,7 @@ class OrganizationViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class DatasetViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Dataset.objects.select_related("organization", "license").all()
+    queryset = Dataset.objects.select_related("organization", "license").prefetch_related("tags").all()
     serializer_class = DatasetSerializer
     permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]

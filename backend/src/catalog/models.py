@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.html import escape, format_html, format_html_join
 from django.utils.text import slugify
+from django.utils import timezone
 from modelcluster.contrib.taggit import ClusterTaggableManager
 from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
@@ -16,11 +17,6 @@ from paradedb.indexes import BM25Index
 from paradedb.queryset import ParadeDBManager
 
 from .file_formats import validate_allowed_upload
-from .metadata_schemas import (
-    DUBLIN_CORE_FIELDS,
-    DUBLIN_CORE_MANAGED_FIELDS,
-    dublin_core_editable_fields,
-)
 
 
 def _generate_unique_slug(model_class, source_value, instance_pk=None, parent_field=None):
@@ -63,6 +59,27 @@ def _display_user(user):
 
 def _default_resource_data_schema():
     return getattr(settings, "RESOURCE_DATA_SCHEMA", "resource_data")
+
+
+DATASET_METADATA_FIELD_LABELS = {
+    "creation_date": "Creation date",
+    "publish_date": "Publish date",
+    "update_date": "Update date",
+    "source": "Source",
+    "type": "Type",
+    "coverage": "Coverage",
+    "author": "Author",
+    "editor": "Editor",
+    "other_colabs": "Other collaborators",
+    "language": "Language",
+}
+
+DATASET_METADATA_FIELD_NAMES = tuple(DATASET_METADATA_FIELD_LABELS)
+DATASET_METADATA_EDITABLE_FIELD_NAMES = tuple(
+    field_name
+    for field_name in DATASET_METADATA_FIELD_NAMES
+    if field_name not in {"creation_date", "publish_date", "update_date"}
+)
 
 
 class DerivedTablesPanel(HelpPanel):
@@ -192,16 +209,29 @@ class Dataset(ClusterableModel):
         ANNUALLY = "annually", "Annually"
         UNKNOWN = "unknown", "Unknown"
 
-    title = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=220, unique=True, blank=True)
-    description = models.TextField(blank=True)
+    # Dates
+    creation_date = models.DateField(default=timezone.localdate, editable=False) # 14. DC.Created
+    publish_date = models.DateField(blank=True, null=True, editable=False) # 5. DC.Published
+    update_date = models.DateField(default=timezone.localdate, editable=False) # 6. DC.Modified
+
+    title = models.CharField(max_length=255) # 1. DC.Title
+    slug = models.SlugField(max_length=220, unique=True, blank=True) # 2. DC.Identifier
+    description = models.TextField(blank=True) # 3. DC.Description
+    source = models.TextField(blank=True) # 4. DC.Source
+    type = models.TextField(blank=True) # 5. DC.Type
+    coverage = models.TextField(blank=True) # 7. DC.Coverage
+    author = models.TextField(blank=True) # 8. DC.Creator
+    editor = models.TextField(blank=True) # 9. DC.Publisher
+    other_colabs = models.TextField(blank=True) # 10. DC.Contributor
     license = models.ForeignKey(
         LicenseType,
         on_delete=models.SET_NULL,
         related_name="datasets",
         blank=True,
         null=True,
-    )
+    ) # 11. DC.Rights
+    language = models.TextField(blank=True) # 13. DC.Language
+    
     update_frequency = models.CharField(
         max_length=32,
         choices=UpdateFrequency.choices,
@@ -214,16 +244,7 @@ class Dataset(ClusterableModel):
         blank=True,
         null=True,
     )
-    dc_subject = models.TextField(blank=True)
-    dc_description = models.TextField(blank=True)
-    dc_date = models.TextField(blank=True)
-    dc_type = models.TextField(blank=True)
-    dc_format = models.TextField(blank=True)
-    dc_source = models.TextField(blank=True)
-    dc_language = models.TextField(blank=True)
-    dc_relation = models.TextField(blank=True)
-    dc_coverage = models.TextField(blank=True)
-    tags = ClusterTaggableManager(through="catalog.DatasetTaggedItem", blank=True)
+    tags = ClusterTaggableManager(through="catalog.DatasetTaggedItem", blank=True) # 2. DC.Subject
 
     # ParadeDB full‑text search index (BM25)
     objects = ParadeDBManager()
@@ -241,7 +262,7 @@ class Dataset(ClusterableModel):
                 FieldPanel("update_frequency"),
                 FieldPanel("organization"),
                 FieldPanel("tags"),
-                *[FieldPanel(field_name) for field_name, _label in dublin_core_editable_fields()],
+                *[FieldPanel(field_name) for field_name in DATASET_METADATA_EDITABLE_FIELD_NAMES],
             ],
             heading="Metadata",
         ),
@@ -256,8 +277,13 @@ class Dataset(ClusterableModel):
                     "id": {},
                     "title": {"tokenizer": "unicode_words"},
                     "description": {"tokenizer": "unicode_words"},
-                    "dc_subject": {"tokenizer": "unicode_words"},
-                    "dc_description": {"tokenizer": "unicode_words"},
+                    "source": {"tokenizer": "unicode_words"},
+                    "type": {"tokenizer": "unicode_words"},
+                    "coverage": {"tokenizer": "unicode_words"},
+                    "author": {"tokenizer": "unicode_words"},
+                    "editor": {"tokenizer": "unicode_words"},
+                    "other_colabs": {"tokenizer": "unicode_words"},
+                    "language": {"tokenizer": "unicode_words"},
                 },
                 key_field="id",
                 name="dataset_search_idx",
@@ -272,23 +298,6 @@ class Dataset(ClusterableModel):
         if not self.pk:
             return []
         return list(self.tags.values_list("name", flat=True))
-
-    def dublin_core_defaults(self):
-        return {
-            "description": self.description,
-        }
-
-    def dublin_core_editor_values(self):
-        return {
-            "subject": self.dc_subject,
-            "date": self.dc_date,
-            "type": self.dc_type,
-            "format": self.dc_format,
-            "source": self.dc_source,
-            "language": self.dc_language,
-            "relation": self.dc_relation,
-            "coverage": self.dc_coverage,
-        }
 
     def _creator_log_entry(self):
         if not self.pk:
@@ -318,80 +327,16 @@ class Dataset(ClusterableModel):
             contributors.append(creator_name)
         return contributors
 
-    def dublin_core_managed_values(self, fallback_user=None):
-        return {
-            "title": self.title,
-            "creator": self.creator_display(fallback_user=fallback_user),
-            "description": self.dc_description or self.description,
-            "publisher": self.organization,
-            "contributor": ", ".join(self.contributor_names()),
-            "identifier": self.slug,
-            "rights": self.license,
-        }
-
-    def get_dublin_core(self, fallback_user=None):
-        fields = {field_name: "" for field_name in DUBLIN_CORE_FIELDS}
-        fields.update(
-            {
-                field_name: "" if field_value in (None, "") else str(field_value)
-                for field_name, field_value in self.dublin_core_editor_values().items()
-            }
-        )
-        fields.update(
-            {
-                field_name: "" if field_value in (None, "") else str(field_value)
-                for field_name, field_value in self.dublin_core_managed_values(
-                    fallback_user=fallback_user,
-                ).items()
-            }
-        )
-        return {
-            "schema": "dublincore",
-            "fields": fields,
-        }
-
-    def set_dublin_core(self, value, fallback_user=None):
-        fields = {}
-        if isinstance(value, dict):
-            payload_fields = value.get("fields", {})
-            if isinstance(payload_fields, dict):
-                fields = payload_fields
-
-        self.dc_subject = fields.get("subject", "") or ""
-        self.dc_description = fields.get("description", "") or ""
-        self.dc_date = fields.get("date", "") or ""
-        self.dc_type = fields.get("type", "") or ""
-        self.dc_format = fields.get("format", "") or ""
-        self.dc_source = fields.get("source", "") or ""
-        self.dc_language = fields.get("language", "") or ""
-        self.dc_relation = fields.get("relation", "") or ""
-        self.dc_coverage = fields.get("coverage", "") or ""
-
-    dublin_core = property(get_dublin_core, set_dublin_core)
-    metadata = property(get_dublin_core, set_dublin_core)
-
-    def get_dublin_core_value(self, field_name):
-        return self.dublin_core.get("fields", {}).get(field_name, "")
-
-    def set_dublin_core_value(self, field_name, value):
-        if field_name in DUBLIN_CORE_MANAGED_FIELDS:
-            return
-        setattr(self, f"dc_{field_name}", value or "")
-
     def save(self, *args, **kwargs):
+        today = timezone.localdate()
+        if not self.creation_date:
+            self.creation_date = today
+        if not self.publish_date:
+            self.publish_date = self.creation_date or today
+        self.update_date = today
         if not self.slug:
             self.slug = _generate_unique_slug(Dataset, self.title, self.pk)
         super().save(*args, **kwargs)
-
-
-def _build_dublin_core_property(field_name):
-    def getter(self):
-        return self.get_dublin_core_value(field_name)
-
-    def setter(self, value):
-        self.set_dublin_core_value(field_name, value)
-
-    return property(getter, setter)
 
 class Resource(ClusterableModel):
     class ResourceKind(models.TextChoices):

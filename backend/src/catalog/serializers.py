@@ -12,6 +12,12 @@ from .models import (
 )
 
 
+def _serialize_optional_date(value):
+    if value is None:
+        return None
+    return value.isoformat()
+
+
 class TagNameListField(serializers.Field):
     default_error_messages = {
         "not_a_list": "Expected a list of tag names.",
@@ -209,7 +215,6 @@ class ResourceSerializer(serializers.ModelSerializer):
 
 class DatasetSerializer(serializers.ModelSerializer):
     resources = serializers.SerializerMethodField()
-    dublin_core = serializers.SerializerMethodField()
     metadata = serializers.SerializerMethodField()
     tags = TagNameListField(required=False)
     organization = OrganizationSerializer(read_only=True)
@@ -233,19 +238,19 @@ class DatasetSerializer(serializers.ModelSerializer):
         model = Dataset
         fields = [
             "id",
+            "creation_date",
+            "publish_date",
+            "update_date",
             "title",
             "slug",
             "description",
-            "dc_subject",
-            "dc_description",
-            "dc_date",
-            "dc_type",
-            "dc_format",
-            "dc_source",
-            "dc_language",
-            "dc_relation",
-            "dc_coverage",
-            "dublin_core",
+            "source",
+            "type",
+            "coverage",
+            "author",
+            "editor",
+            "other_colabs",
+            "language",
             "metadata",
             "license",
             "update_frequency",
@@ -257,18 +262,42 @@ class DatasetSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["slug", "created_at", "updated_at"]
+        read_only_fields = [
+            "slug",
+            "creation_date",
+            "publish_date",
+            "update_date",
+            "created_at",
+            "updated_at",
+        ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not self.context.get("include_resources", False):
             self.fields.pop("resources", None)
 
-    def get_dublin_core(self, obj):
-        return obj.dublin_core
-
     def get_metadata(self, obj):
-        return obj.metadata
+        return {
+            "title": obj.title or "",
+            "identifier": obj.slug or "",
+            "description": obj.description or "",
+            "subject": obj.tag_names,
+            "source": obj.source or "",
+            "type": obj.type or "",
+            "coverage": obj.coverage or "",
+            "creator": obj.author or "",
+            "publisher": obj.editor or "",
+            "contributor": obj.other_colabs or "",
+            "rights": (
+                LicenseTypeSerializer(obj.license, context=self.context).data
+                if obj.license_id
+                else None
+            ),
+            "language": obj.language or "",
+            "created": _serialize_optional_date(obj.creation_date),
+            "published": _serialize_optional_date(obj.publish_date),
+            "modified": _serialize_optional_date(obj.update_date),
+        }
 
     def get_resources(self, obj):
         queryset = obj.resources.all()
