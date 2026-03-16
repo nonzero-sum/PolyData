@@ -9,7 +9,7 @@
             </p>
 
             <form class="search-form" @submit.prevent="performSearch">
-                <input v-model="searchTerm" type="search" class="search-input" placeholder="Search datasets by title"
+                <input v-model="searchTerm" type="search" class="search-input" placeholder="Search Datasets"
                     aria-label="Search datasets" />
                 <button class="search-button" type="submit">Search</button>
             </form>

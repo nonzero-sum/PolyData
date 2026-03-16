@@ -271,6 +271,10 @@ class Dataset(ClusterableModel):
 
     class Meta:
         ordering = ["title"]
+        permissions = [
+            ("publish_dataset", "Can publish/unpublish dataset"),
+            ("manage_dataset_permissions", "Can manage dataset permissions"),
+        ]
         indexes = [
             BM25Index(
                 fields={
@@ -412,6 +416,10 @@ class Resource(ClusterableModel):
 
     class Meta:
         ordering = ["dataset__title", "title"]
+        permissions = [
+            ("publish_resource", "Can publish/unpublish resource"),
+            ("manage_resource_permissions", "Can manage resource permissions"),
+        ]
         indexes = [
             BM25Index(
                 fields={

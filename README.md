@@ -117,6 +117,15 @@ You can deploy on any container platform. Be sure to:
 2. Use an appropriate WSGI/ASGI backend (Gunicorn is already configured).
 3. Mount persistent volumes for `db` and `backend` if needed.
 
+## Roadmap
+
+- [] Celery task queue for asynchronous processing
+- [] Fine grained permissions and roles
+- [] Data versioning and history
+- [] More ingestion connectors (CSV, APIs, etc.)
+- [] Map creation and publishing tools
+- [] DataStories and dashboards
+
 ## Contributing
 
 Pull requests are welcome! 🙌

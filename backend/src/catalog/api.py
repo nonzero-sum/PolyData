@@ -7,6 +7,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from .models import Dataset, DatasetTag, Organization, Resource, ResourceTable
+from .permissions import CatalogObjectPermissions
 from .serializers import (
     DatasetSerializer,
     OrganizationSerializer,
@@ -36,7 +37,7 @@ class OrganizationViewSet(viewsets.ReadOnlyModelViewSet):
 class DatasetViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Dataset.objects.select_related("organization", "license").prefetch_related("tags").all()
     serializer_class = DatasetSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [CatalogObjectPermissions]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_class = DatasetFilter
     ordering_fields = ["title", "created_at", "updated_at", "update_frequency"]
@@ -119,7 +120,7 @@ class ResourceViewSet(viewsets.ReadOnlyModelViewSet):
         "api_items",
     ).all()
     serializer_class = ResourceSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [CatalogObjectPermissions]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_class = ResourceFilter
     ordering_fields = ["title", "created_at", "updated_at", "processed_at"]

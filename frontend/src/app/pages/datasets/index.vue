@@ -4,8 +4,8 @@
         <p class="subtitle">Browse the public catalog and filter datasets by title, organization, tag, and metadata.</p>
 
         <form class="search-form" @submit.prevent="performSearch">
-            <input v-model="searchTerm" class="search-input search-field" type="search"
-                placeholder="Search datasets by title" aria-label="Search datasets" />
+            <input v-model="searchTerm" class="search-input search-field" type="search" placeholder="Search Datasets"
+                aria-label="Search datasets" />
             <select v-model="selectedOrganization" class="filter-select" aria-label="Filter by organization">
                 <option value="">All organizations</option>
                 <option v-for="organization in organizationOptions" :key="organization.id" :value="organization.slug">

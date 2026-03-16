@@ -203,6 +203,13 @@ class ResourceForm(WagtailAdminModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
+
+        # Only users with the publish permission can set the resource to published.
+        if self.for_user is not None:
+            published = cleaned_data.get("published")
+            if published and not self.for_user.has_perm("catalog.publish_resource"):
+                self.add_error("published", "No tienes permiso para publicar recursos.")
+
         metadata = dict(cleaned_data.get("metadata") or {})
         if not metadata.get("created_by_display") and self.for_user is not None:
             metadata["created_by_display"] = self.instance.creator_display(fallback_user=self.for_user)
