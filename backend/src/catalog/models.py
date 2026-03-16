@@ -351,8 +351,8 @@ class Dataset(WorkflowMixin, DraftStateMixin, RevisionMixin, ClusterableModel):
             self.slug = _generate_unique_slug(Dataset, self.title, self.pk)
         super().save(*args, **kwargs)
 
-class Resource(WorkflowMixin, DraftStateMixin, RevisionMixin, ClusterableModel):
-    # Use Wagtail draft/publish workflow fields so resources can be managed like pages.
+class Resource(RevisionMixin, ClusterableModel):
+    # Resources are not managed via Wagtail draft/publish workflow (unlike datasets).
 
     class ResourceKind(models.TextChoices):
         IMAGE = "image", "Image"
@@ -454,6 +454,15 @@ class Resource(WorkflowMixin, DraftStateMixin, RevisionMixin, ClusterableModel):
     def __str__(self):
         return f"{self.dataset.title} / {self.title}"
 
+    @property
+    def status_string(self):
+        """Return a status string for Wagtail admin list views.
+
+        Wagtail uses ``status_string`` to show the publishing/draft state of objects
+        in snippet index views.
+        """
+        return "live" if self.published else "draft"
+
     @classmethod
     def normalize_storage_kind(cls, value):
         if value in {cls.StorageKind.DEFAULT, cls.StorageKind.DEFAULT_POSTGRES}:
@@ -520,11 +529,7 @@ class Resource(WorkflowMixin, DraftStateMixin, RevisionMixin, ClusterableModel):
             self.resource_kind = self.ResourceKind.DOCUMENT
         self.storage_kind = self.normalize_storage_kind(self.storage_kind)
 
-        # Keep the legacy `published` field in sync with Wagtail's draft state.
-        # Publishing/unpublishing is now managed through the Wagtail action menu.
-        if hasattr(self, "live"):
-            self.published = bool(self.live)
-
+        # Published is now managed explicitly via the `published` field (not via draft/live state).
         if not self.supports_postgres_storage(self.resource_kind):
             self.storage_kind = self.StorageKind.DEFAULT
         if not self.slug:
