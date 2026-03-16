@@ -454,15 +454,6 @@ class Resource(RevisionMixin, ClusterableModel):
     def __str__(self):
         return f"{self.dataset.title} / {self.title}"
 
-    @property
-    def status_string(self):
-        """Return a status string for Wagtail admin list views.
-
-        Wagtail uses ``status_string`` to show the publishing/draft state of objects
-        in snippet index views.
-        """
-        return "live" if self.published else "draft"
-
     @classmethod
     def normalize_storage_kind(cls, value):
         if value in {cls.StorageKind.DEFAULT, cls.StorageKind.DEFAULT_POSTGRES}:
