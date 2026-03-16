@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.html import escape, format_html, format_html_join
 from django.utils.text import slugify
+from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
 from modelcluster.contrib.taggit import ClusterTaggableManager
 from modelcluster.fields import ParentalKey
@@ -11,6 +12,7 @@ from taggit.models import TagBase, TaggedItemBase
 from wagtail.admin.panels import FieldPanel, HelpPanel, InlinePanel, MultiFieldPanel
 from wagtail.documents import get_document_model_string
 from wagtail.log_actions import registry as log_action_registry
+from wagtail.models import DraftStateMixin, RevisionMixin, WorkflowMixin
 from wagtail.snippets.models import register_snippet
 
 from paradedb.indexes import BM25Index
@@ -199,7 +201,10 @@ class DatasetTaggedItem(TaggedItemBase):
     )
 
 
-class Dataset(ClusterableModel):
+class Dataset(WorkflowMixin, DraftStateMixin, RevisionMixin, ClusterableModel):
+    # Use Wagtail draft/publish workflow fields so datasets can be managed like pages.
+    live = models.BooleanField(verbose_name=_("live"), default=False, editable=False)
+
     class UpdateFrequency(models.TextChoices):
         AS_NEEDED = "as_needed", "As needed"
         HOURLY = "hourly", "Hourly"
@@ -335,14 +340,20 @@ class Dataset(ClusterableModel):
         today = timezone.localdate()
         if not self.creation_date:
             self.creation_date = today
-        if not self.publish_date:
-            self.publish_date = self.creation_date or today
+
+        # Use Wagtail's `live` flag (draft state) so datasets can be created as drafts.
+        # When a dataset becomes live for the first time, set its publish date.
+        if self.live and not self.publish_date:
+            self.publish_date = today
+
         self.update_date = today
         if not self.slug:
             self.slug = _generate_unique_slug(Dataset, self.title, self.pk)
         super().save(*args, **kwargs)
 
-class Resource(ClusterableModel):
+class Resource(WorkflowMixin, DraftStateMixin, RevisionMixin, ClusterableModel):
+    # Use Wagtail draft/publish workflow fields so resources can be managed like pages.
+
     class ResourceKind(models.TextChoices):
         IMAGE = "image", "Image"
         DOCUMENT = "document", "Document"
@@ -400,7 +411,7 @@ class Resource(ClusterableModel):
         FieldPanel("storage_kind"),
         FieldPanel("media_type"),
         FieldPanel("metadata"),
-        FieldPanel("published"),
+        # The publish state is managed via the Wagtail action menu (publish/unpublish)
         MultiFieldPanel(
             [
                 FieldPanel("processing_status", read_only=True),
@@ -508,6 +519,12 @@ class Resource(ClusterableModel):
         if self.resource_kind == "file":
             self.resource_kind = self.ResourceKind.DOCUMENT
         self.storage_kind = self.normalize_storage_kind(self.storage_kind)
+
+        # Keep the legacy `published` field in sync with Wagtail's draft state.
+        # Publishing/unpublishing is now managed through the Wagtail action menu.
+        if hasattr(self, "live"):
+            self.published = bool(self.live)
+
         if not self.supports_postgres_storage(self.resource_kind):
             self.storage_kind = self.StorageKind.DEFAULT
         if not self.slug:

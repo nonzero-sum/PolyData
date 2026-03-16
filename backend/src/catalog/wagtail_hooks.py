@@ -13,7 +13,7 @@ class DatasetSnippetViewSet(SnippetViewSet):
     menu_label = "Datasets"
     menu_name = "catalog_datasets"
     menu_order = 310
-    list_display = ["title", "organization", "update_frequency", "updated_at"]
+    list_display = ["title", "organization", "status_string", "update_frequency", "updated_at"]
     search_fields = ["title", "description", "slug"]
     ordering = ["title"]
 
@@ -25,7 +25,7 @@ class ResourceSnippetViewSet(SnippetViewSet):
     menu_label = "Resources"
     menu_name = "catalog_resources"
     menu_order = 311
-    list_display = ["title", "dataset", "resource_kind", "storage_kind", "updated_at"]
+    list_display = ["title", "dataset", "status_string", "resource_kind", "storage_kind", "updated_at"]
     search_fields = ["title", "description", "slug", "dataset__title"]
     ordering = ["dataset__title", "title"]
 
