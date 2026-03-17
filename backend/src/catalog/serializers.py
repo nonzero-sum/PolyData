@@ -183,6 +183,8 @@ class ResourceSerializer(serializers.ModelSerializer):
             "is_geospatial",
             "metadata",
             "published",
+            "processing_status",
+            "processing_message",
             "processed_at",
             "file_representation",
             "tables",
@@ -196,6 +198,8 @@ class ResourceSerializer(serializers.ModelSerializer):
             "is_geospatial",
             "storage_kind",
             "media_type",
+            "processing_status",
+            "processing_message",
             "processed_at",
             "created_at",
             "updated_at",
@@ -300,11 +304,15 @@ class DatasetSerializer(serializers.ModelSerializer):
         }
 
     def get_resources(self, obj):
-        queryset = obj.resources.all()
+        queryset = Resource.objects.filter(dataset_id=obj.pk).prefetch_related(
+            "file_items",
+            "tables",
+            "api_items",
+        )
         if self.context.get("public_only", False):
             queryset = queryset.filter(published=True)
         return ResourceSerializer(
-            queryset,
+            queryset.order_by("title", "pk"),
             many=True,
             context=self.context,
         ).data

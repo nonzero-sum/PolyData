@@ -40,7 +40,7 @@ function getFeatureType(features) {
         return null
     }
 
-    const geometry = features[0] && features[0].geometry
+    const geometry = features[0]?.geometry
     return geometry ? geometry.type : null
 }
 
@@ -83,22 +83,6 @@ function createLayerConfig(geometryType) {
     }
 }
 
-function appendCoordinates(geometry, result) {
-    if (!geometry || !geometry.type) {
-        return
-    }
-
-    if (geometry.type === 'GeometryCollection') {
-        const geometries = Array.isArray(geometry.geometries) ? geometry.geometries : []
-        for (const childGeometry of geometries) {
-            appendCoordinates(childGeometry, result)
-        }
-        return
-    }
-
-    appendNestedCoordinates(geometry.coordinates, result)
-}
-
 function appendNestedCoordinates(value, result) {
     if (!Array.isArray(value)) {
         return
@@ -114,17 +98,34 @@ function appendNestedCoordinates(value, result) {
     }
 }
 
+function appendCoordinates(geometry, result) {
+    if (!geometry?.type) {
+        return
+    }
+
+    if (geometry.type === 'GeometryCollection') {
+        const geometries = Array.isArray(geometry.geometries) ? geometry.geometries : []
+        for (const childGeometry of geometries) {
+            appendCoordinates(childGeometry, result)
+        }
+        return
+    }
+
+    appendNestedCoordinates(geometry.coordinates, result)
+}
+
 function computeGeojsonBoundingBox(geojson) {
     if (!geojson || !Array.isArray(geojson.features)) {
         return null
     }
 
     const coordinates = []
+
     for (const feature of geojson.features) {
-        appendCoordinates(feature && feature.geometry, coordinates)
+        appendCoordinates(feature?.geometry, coordinates)
     }
 
-    if (coordinates.length === 0) {
+    if (!coordinates.length) {
         return null
     }
 
@@ -133,10 +134,7 @@ function computeGeojsonBoundingBox(geojson) {
     let maxX = coordinates[0][0]
     let maxY = coordinates[0][1]
 
-    for (const coordinate of coordinates) {
-        const x = coordinate[0]
-        const y = coordinate[1]
-
+    for (const [x, y] of coordinates) {
         if (x < minX) minX = x
         if (y < minY) minY = y
         if (x > maxX) maxX = x
@@ -156,7 +154,7 @@ function fitMapToData(geojson) {
         return
     }
 
-    if (Array.isArray(geojson.bbox) && geojson.bbox.length === 4) {
+    if (Array.isArray(geojson?.bbox) && geojson.bbox.length === 4) {
         mapInstance.fitBounds(geojson.bbox, { padding: 40, duration: 0 })
         return
     }
@@ -180,9 +178,9 @@ async function loadGeojson() {
         return
     }
 
-    try {
-        error.value = null
+    error.value = null
 
+    try {
         const response = await fetch(buildItemsUrl())
         if (!response.ok) {
             throw new Error(`Unable to load GeoJSON (${response.status})`)
@@ -225,7 +223,9 @@ function setUpMap() {
         'top-right'
     )
 
-    mapInstance.on('load', loadGeojson)
+    mapInstance.on('load', () => {
+        loadGeojson()
+    })
 }
 
 onMounted(() => {
@@ -245,13 +245,16 @@ onBeforeUnmount(() => {
     mapInstance = null
 })
 
-watch(() => props.collectionUrl, () => {
-    if (!mapInstance) {
-        return
-    }
+watch(
+    () => props.collectionUrl,
+    () => {
+        if (!mapInstance) {
+            return
+        }
 
-    loadGeojson()
-})
+        loadGeojson()
+    }
+)
 </script>
 
 <style scoped>
