@@ -57,7 +57,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 
 const resource = ref(null)
 const route = useRoute()
@@ -73,8 +73,10 @@ async function fetchResource() {
     resource.value = res.ok ? await res.json() : null
 }
 
-await fetchResource()
-watch(() => route.params.id, fetchResource)
+if (process.client) {
+    onMounted(fetchResource)
+    watch(() => route.params.id, fetchResource)
+}
 </script>
 
 <style scoped>
