@@ -869,6 +869,30 @@ def _read_vector_file_from_bytes(raw_content, suffix, layer_name=None):
         return gpd.read_file(temp_file.name, **read_kwargs)
 
 
+def _sqlite_quote_identifier(identifier):
+    return f'"{str(identifier).replace("\"", "\"\"")}"'
+
+
+def _normalize_tabular_dataframe(dataframe, *, empty_message):
+    if dataframe.empty and len(dataframe.columns) == 0:
+        raise ValueError(empty_message)
+
+    normalized_dataframe, column_mapping = _normalize_dataframe_columns(dataframe)
+    normalized_dataframe, column_mapping = _reserve_internal_column_names(
+        normalized_dataframe,
+        column_mapping,
+        {"id"},
+    )
+    normalized_dataframe = normalized_dataframe.reset_index(drop=True)
+    normalized_dataframe.index = pd.RangeIndex(
+        start=1,
+        stop=len(normalized_dataframe) + 1,
+        step=1,
+        name="id",
+    )
+    return normalized_dataframe, column_mapping
+
+
 def _normalize_spatial_geodataframe(
     geodataframe,
     *,
@@ -913,7 +937,7 @@ def _normalize_spatial_geodataframe(
     return normalized_geodataframe, column_mapping, normalized_geometry_column
 
 
-def _load_geopackage_geodataframes(file_representation):
+def _load_geopackage_layers(file_representation):
     raw_content = _read_document_bytes(file_representation)
     if raw_content is None:
         raise ValueError("GeoPackage ingestion requires a readable source document.")
@@ -928,36 +952,62 @@ def _load_geopackage_geodataframes(file_representation):
                 """
                 SELECT
                     c.table_name,
-                    COALESCE(NULLIF(c.identifier, ''), c.table_name)
+                    COALESCE(NULLIF(c.identifier, ''), c.table_name),
+                    c.data_type
                 FROM gpkg_contents AS c
-                JOIN gpkg_geometry_columns AS g
-                    ON g.table_name = c.table_name
-                WHERE c.data_type = 'features'
-                ORDER BY c.table_name
+                WHERE c.data_type IN ('features', 'attributes')
+                ORDER BY
+                    CASE c.data_type
+                        WHEN 'features' THEN 0
+                        ELSE 1
+                    END,
+                    c.table_name
                 """
             )
             layer_rows = cursor.fetchall()
 
         if not layer_rows:
-            raise ValueError("GeoPackage file does not contain feature layers.")
+            raise ValueError("GeoPackage file does not contain ingestible layers.")
 
         layers = []
-        for source_layer_name, display_layer_name in layer_rows:
-            geodataframe = gpd.read_file(temp_file.name, layer=source_layer_name)
-            normalized_geodataframe, column_mapping, geometry_field = _normalize_spatial_geodataframe(
-                geodataframe,
-                empty_message=f"GeoPackage layer '{display_layer_name}' does not contain features.",
-                missing_geometry_message=(
-                    f"GeoPackage layer '{display_layer_name}' must include a geometry column."
-                ),
+        for source_layer_name, display_layer_name, data_type in layer_rows:
+            if data_type == "features":
+                geodataframe = gpd.read_file(temp_file.name, layer=source_layer_name)
+                normalized_geodataframe, column_mapping, geometry_field = _normalize_spatial_geodataframe(
+                    geodataframe,
+                    empty_message=f"GeoPackage layer '{display_layer_name}' does not contain features.",
+                    missing_geometry_message=(
+                        f"GeoPackage layer '{display_layer_name}' must include a geometry column."
+                    ),
+                )
+                layers.append(
+                    {
+                        "source_layer_name": source_layer_name,
+                        "display_layer_name": display_layer_name,
+                        "data_type": data_type,
+                        "dataframe": normalized_geodataframe,
+                        "column_mapping": column_mapping,
+                        "geometry_field": geometry_field,
+                    }
+                )
+                continue
+
+            dataframe = pd.read_sql_query(
+                f"SELECT * FROM {_sqlite_quote_identifier(source_layer_name)}",
+                sqlite_connection,
+            )
+            normalized_dataframe, column_mapping = _normalize_tabular_dataframe(
+                dataframe,
+                empty_message=f"GeoPackage table '{display_layer_name}' does not contain columns.",
             )
             layers.append(
                 {
                     "source_layer_name": source_layer_name,
                     "display_layer_name": display_layer_name,
-                    "geodataframe": normalized_geodataframe,
+                    "data_type": data_type,
+                    "dataframe": normalized_dataframe,
                     "column_mapping": column_mapping,
-                    "geometry_field": geometry_field,
+                    "geometry_field": "",
                 }
             )
 
@@ -1038,36 +1088,42 @@ def _ingest_geojson_resource(resource, file_representation, metadata):
 
 def _ingest_geopackage_resource(resource, file_representation, metadata):
     schema_name = ensure_resource_data_schema()
-    layers = _load_geopackage_geodataframes(file_representation)
+    layers = _load_geopackage_layers(file_representation)
     ingested_layers = []
 
     for index, layer in enumerate(layers):
-        geodataframe = layer["geodataframe"]
+        dataframe = layer["dataframe"]
         geometry_field = layer["geometry_field"]
         table_name = _build_layer_table_name(resource, layer["source_layer_name"])
-        _replace_spatial_table(schema_name, table_name, geodataframe, geometry_field)
+        if geometry_field:
+            _replace_spatial_table(schema_name, table_name, dataframe, geometry_field)
+        else:
+            _replace_tabular_table(schema_name, table_name, dataframe)
 
         bbox = []
-        if not geodataframe.empty:
-            total_bounds = geodataframe.total_bounds.tolist()
+        if geometry_field and not dataframe.empty:
+            total_bounds = dataframe.total_bounds.tolist()
             if len(total_bounds) == 4:
                 bbox = [float(value) for value in total_bounds]
 
-        srid = geodataframe.crs.to_epsg() if geodataframe.crs is not None else 4326
-        if srid is None:
-            srid = 4326
+        srid = None
+        if geometry_field:
+            srid = dataframe.crs.to_epsg() if dataframe.crs is not None else 4326
+            if srid is None:
+                srid = 4326
 
         ingested_layers.append(
             {
                 "layer_name": layer["display_layer_name"],
                 "source_layer_name": layer["source_layer_name"],
+                "data_type": layer["data_type"],
                 "table_name": table_name,
                 "geometry_field": geometry_field,
                 "srid": srid,
                 "bbox": bbox,
-                "row_count": len(geodataframe.index),
+                "row_count": len(dataframe.index),
                 "is_primary": index == 0,
-                "ingested_columns": list(geodataframe.columns),
+                "ingested_columns": list(dataframe.columns),
                 "source_column_map": layer["column_mapping"],
             }
         )
@@ -1082,6 +1138,7 @@ def _ingest_geopackage_resource(resource, file_representation, metadata):
         {
             "source_layer_name": layer["source_layer_name"],
             "display_layer_name": layer["layer_name"],
+            "data_type": layer["data_type"],
             "target_table": layer["table_name"],
             "geometry_field": layer["geometry_field"],
             "srid": layer["srid"],
