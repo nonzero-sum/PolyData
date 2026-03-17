@@ -18,26 +18,19 @@
 
         <section class="layout">
             <div class="panel">
-                <h2>Tables</h2>
-                <div v-if="resource.tables?.length" class="tables">
-                    <div v-for="table in resource.tables" :key="table.id" class="table-card">
-                        <div class="table-title">{{ table.layer_name || table.table_name }}</div>
-                        <div class="table-meta">
-                            {{ table.qualified_table_name }}<span v-if="table.is_primary"> | primary</span>
-                        </div>
-                        <div class="table-meta">
-                            Rows: {{ table.row_count }}<span v-if="table.geometry_field"> | Geometry: {{
-                                table.geometry_field }}</span>
-                        </div>
-                        <div class="table-links">
-                            <a v-if="table.table_url" class="button-link" :href="table.table_url">table_url</a>
-                            <a v-if="table.rows_url" class="button-link" :href="table.rows_url">rows_url</a>
-                            <a v-if="table.ogc_collection_url" class="button-link primary"
-                                :href="table.ogc_collection_url">ogc_collection_url</a>
-                        </div>
-                    </div>
+                <h2>Preview</h2>
+
+                <div v-if="hasMapPreview" class="preview-grid">
+                    <ResourceMapPreview :collectionUrl="mapCollectionUrl" :bounds="mapBounds" />
                 </div>
-                <div v-else class="table-meta">This resource has no derived tables yet.</div>
+
+                <div v-if="resource.tables?.length" class="preview-grid">
+                    <ResourceTablePreview v-for="table in resource.tables" :key="table.id" :rowsUrl="table.rows_url" />
+                </div>
+
+                <div v-if="!hasMapPreview && !resource.tables?.length" class="table-meta">
+                    No preview available for this resource.
+                </div>
             </div>
 
             <aside class="panel">
@@ -57,11 +50,21 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, computed, onMounted } from 'vue'
 
 const resource = ref(null)
 const route = useRoute()
 const apiBaseUrl = useApiBaseUrl()
+
+const mapTable = computed(() => {
+    // Prefer spatial table with OGC API support.
+    const tables = resource.value?.tables || []
+    return tables.find((table) => table.ogc_collection_url) ?? tables[0] ?? null
+})
+
+const hasMapPreview = computed(() => !!mapTable.value && !!mapTable.value.ogc_collection_url)
+const mapCollectionUrl = computed(() => mapTable.value?.ogc_collection_url || '')
+const mapBounds = computed(() => mapTable.value?.bbox || null)
 
 function formatLabel(value) {
     if (!value) return 'Unknown'
@@ -78,6 +81,125 @@ if (process.client) {
     watch(() => route.params.id, fetchResource)
 }
 </script>
+
+<style scoped>
+.hero {
+    padding: 24px 0;
+}
+
+.eyebrow {
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.82rem;
+    margin: 0 0 10px;
+}
+
+h1 {
+    margin: 0;
+    font-size: clamp(2.6rem, 6vw, 4.6rem);
+    line-height: 0.98;
+}
+
+.lead {
+    color: var(--muted);
+    max-width: 62ch;
+    line-height: 1.7;
+    margin: 18px 0 0;
+}
+
+.layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.9fr);
+    gap: 18px;
+    padding: 18px 0 56px;
+}
+
+.panel {
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    padding: 24px;
+    background: var(--card);
+}
+
+.panel h2 {
+    margin: 0 0 16px;
+    font-size: 1.2rem;
+}
+
+.preview-grid {
+    display: grid;
+    gap: 18px;
+}
+
+.facts {
+    display: grid;
+    gap: 12px;
+}
+
+.fact-label {
+    display: block;
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 3px;
+}
+
+.button-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+}
+
+.tag-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.tag-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: rgba(15, 118, 110, 0.08);
+    color: var(--accent);
+    font-size: 0.82rem;
+}
+
+.button-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: white;
+    color: var(--ink);
+    font-size: 0.95rem;
+}
+
+.button-link.primary {
+    border-color: rgba(15, 118, 110, 0.18);
+    background: rgba(15, 118, 110, 0.1);
+    color: var(--accent);
+}
+
+.table-meta {
+    color: var(--muted);
+    font-size: 0.95rem;
+}
+
+@media (max-width: 860px) {
+    .layout {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
 
 <style scoped>
 .hero {
