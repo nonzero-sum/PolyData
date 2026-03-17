@@ -4,9 +4,11 @@ from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
+from ingestion.tasks import process_resource_task
+
 from .models import Dataset, Resource, ResourceAPI, ResourceFile, ResourceTable
 from .pygeoapi import sync_pygeoapi_settings
-from ingestion.services import drop_resource_table_storage, process_resource
+from ingestion.services import drop_resource_table_storage
 
 
 def _schedule_pygeoapi_sync(using=None):
@@ -44,10 +46,7 @@ def _schedule_resource_processing(resource, using=None):
 
     def _run_processing():
         scheduled_resource_ids.discard(resource_pk)
-        instance = Resource.objects.filter(pk=resource_pk).first()
-        if instance is None:
-            return
-        _process_resource_if_needed(instance)
+        process_resource_task.delay(resource_pk)
 
     transaction.on_commit(_run_processing, using=using)
 
@@ -74,16 +73,6 @@ def _handle_resource_source_delete(resource, message, *, using=None, kwargs=None
     _mark_resource_pending(resource, message)
     _schedule_resource_processing(resource, using=using)
     _schedule_pygeoapi_sync(using=using)
-
-
-def _resource_has_processing_source(resource):
-    if resource.file_items.exclude(document=None).exists():
-        return True
-    if resource.api_items.exists():
-        return True
-    if resource.tables.exists():
-        return True
-    return False
 
 
 def _mark_resource_pending(resource, message):
@@ -124,33 +113,6 @@ def _resource_source_changed(instance, field_names):
 
     current = {field_name: getattr(instance, field_name) for field_name in field_names}
     return any(previous.get(field_name) != current.get(field_name) for field_name in field_names)
-
-
-def _process_resource_if_needed(resource):
-    if resource.processing_status not in {
-        Resource.ProcessingStatus.PENDING,
-        Resource.ProcessingStatus.FAILED,
-    }:
-        return False
-
-    if not _resource_has_processing_source(resource):
-        return False
-
-    updated = Resource.objects.filter(
-        pk=resource.pk,
-        processing_status__in=[
-            Resource.ProcessingStatus.PENDING,
-            Resource.ProcessingStatus.FAILED,
-        ],
-    ).update(
-        processing_status=Resource.ProcessingStatus.PROCESSING,
-        processing_message="Processing resource.",
-    )
-    if not updated:
-        return False
-
-    process_resource(Resource.objects.get(pk=resource.pk))
-    return True
 
 
 @receiver(pre_save, sender=ResourceFile)
