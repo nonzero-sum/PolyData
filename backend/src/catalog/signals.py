@@ -1,11 +1,79 @@
 import json
 
+from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
 from .models import Dataset, Resource, ResourceAPI, ResourceFile, ResourceTable
 from .pygeoapi import sync_pygeoapi_settings
 from ingestion.services import drop_resource_table_storage, process_resource
+
+
+def _schedule_pygeoapi_sync(using=None):
+    connection = transaction.get_connection(using=using)
+    flag_name = "_catalog_pygeoapi_sync_scheduled"
+
+    if getattr(connection, flag_name, False):
+        return
+
+    setattr(connection, flag_name, True)
+
+    def _run_sync():
+        setattr(connection, flag_name, False)
+        sync_pygeoapi_settings()
+
+    transaction.on_commit(_run_sync, using=using)
+
+
+def _schedule_resource_processing(resource, using=None):
+    if getattr(resource, "pk", None) is None:
+        return
+
+    connection = transaction.get_connection(using=using)
+    flag_name = "_catalog_resource_processing_scheduled"
+    scheduled_resource_ids = getattr(connection, flag_name, None)
+    if scheduled_resource_ids is None:
+        scheduled_resource_ids = set()
+        setattr(connection, flag_name, scheduled_resource_ids)
+
+    if resource.pk in scheduled_resource_ids:
+        return
+
+    scheduled_resource_ids.add(resource.pk)
+    resource_pk = resource.pk
+
+    def _run_processing():
+        scheduled_resource_ids.discard(resource_pk)
+        instance = Resource.objects.filter(pk=resource_pk).first()
+        if instance is None:
+            return
+        _process_resource_if_needed(instance)
+
+    transaction.on_commit(_run_processing, using=using)
+
+
+def _is_parent_delete_cascade(kwargs):
+    origin = kwargs.get("origin")
+    if isinstance(origin, (Dataset, Resource)):
+        return True
+
+    origin_model = getattr(origin, "model", None)
+    return origin_model in {Dataset, Resource}
+
+
+def _handle_resource_source_save(resource, using=None):
+    _schedule_resource_processing(resource, using=using)
+    _schedule_pygeoapi_sync(using=using)
+
+
+def _handle_resource_source_delete(resource, message, *, using=None, kwargs=None):
+    if kwargs and _is_parent_delete_cascade(kwargs):
+        _schedule_pygeoapi_sync(using=using)
+        return
+
+    _mark_resource_pending(resource, message)
+    _schedule_resource_processing(resource, using=using)
+    _schedule_pygeoapi_sync(using=using)
 
 
 def _resource_has_processing_source(resource):
@@ -111,47 +179,51 @@ def mark_resource_pending_before_api_change(sender, instance, **kwargs):
 
 @receiver(post_save, sender=Resource)
 def process_resource_on_save(sender, instance, created, **kwargs):
-    _process_resource_if_needed(instance)
-    sync_pygeoapi_settings()
+    using = kwargs.get("using")
+    _handle_resource_source_save(instance, using=using)
 
 
 @receiver(post_delete, sender=Resource)
 def sync_after_resource_delete(sender, instance, **kwargs):
-    sync_pygeoapi_settings()
+    _schedule_pygeoapi_sync(using=kwargs.get("using"))
 
 
 @receiver(post_save, sender=Dataset)
 def sync_after_dataset_save(sender, instance, **kwargs):
-    sync_pygeoapi_settings()
+    _schedule_pygeoapi_sync(using=kwargs.get("using"))
 
 
 @receiver(post_delete, sender=Dataset)
 def sync_after_dataset_delete(sender, instance, **kwargs):
-    sync_pygeoapi_settings()
+    _schedule_pygeoapi_sync(using=kwargs.get("using"))
 
 
 @receiver(post_save, sender=ResourceFile)
 def process_file_representation_on_save(sender, instance, **kwargs):
-    _process_resource_if_needed(instance.resource)
-    sync_pygeoapi_settings()
+    using = kwargs.get("using")
+    _handle_resource_source_save(instance.resource, using=using)
 
 
 @receiver(post_delete, sender=ResourceFile)
 def sync_after_file_representation_delete(sender, instance, **kwargs):
-    _mark_resource_pending(instance.resource, "Source file removed. Awaiting reprocessing.")
-    _process_resource_if_needed(instance.resource)
-    sync_pygeoapi_settings()
+    using = kwargs.get("using")
+    _handle_resource_source_delete(
+        instance.resource,
+        "Source file removed. Awaiting reprocessing.",
+        using=using,
+        kwargs=kwargs,
+    )
 
 
 @receiver(post_save, sender=ResourceTable)
 def process_table_representation_on_save(sender, instance, **kwargs):
-    _process_resource_if_needed(instance.resource)
-    sync_pygeoapi_settings()
+    using = kwargs.get("using")
+    _handle_resource_source_save(instance.resource, using=using)
 
 
 @receiver(post_delete, sender=ResourceTable)
 def sync_after_table_representation_delete(sender, instance, **kwargs):
-    sync_pygeoapi_settings()
+    _schedule_pygeoapi_sync(using=kwargs.get("using"))
 
 
 @receiver(pre_delete, sender=ResourceTable)
@@ -161,12 +233,16 @@ def drop_table_storage_before_resource_table_delete(sender, instance, **kwargs):
 
 @receiver(post_save, sender=ResourceAPI)
 def process_api_representation_on_save(sender, instance, **kwargs):
-    _process_resource_if_needed(instance.resource)
-    sync_pygeoapi_settings()
+    using = kwargs.get("using")
+    _handle_resource_source_save(instance.resource, using=using)
 
 
 @receiver(post_delete, sender=ResourceAPI)
 def sync_after_api_representation_delete(sender, instance, **kwargs):
-    _mark_resource_pending(instance.resource, "API source removed. Awaiting reprocessing.")
-    _process_resource_if_needed(instance.resource)
-    sync_pygeoapi_settings()
+    using = kwargs.get("using")
+    _handle_resource_source_delete(
+        instance.resource,
+        "API source removed. Awaiting reprocessing.",
+        using=using,
+        kwargs=kwargs,
+    )

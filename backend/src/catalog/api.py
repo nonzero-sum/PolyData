@@ -6,6 +6,8 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from drf_spectacular.utils import extend_schema
+
 from .models import Dataset, DatasetTag, Organization, Resource, ResourceTable
 from .permissions import CatalogObjectPermissions
 from .serializers import (
@@ -166,6 +168,7 @@ class ResourceViewSet(viewsets.ReadOnlyModelViewSet):
         except resource.api_items.model.DoesNotExist as error:
             raise NotFound("This resource does not have an API representation with that id.") from error
 
+    @extend_schema(operation_id="resource_files_list")
     @action(detail=True, methods=["get"])
     def files(self, request, pk=None):
         resource = self.get_object()
@@ -181,6 +184,7 @@ class ResourceViewSet(viewsets.ReadOnlyModelViewSet):
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
+    @extend_schema(operation_id="resource_file_retrieve")
     @action(detail=True, methods=["get"], url_path=r"files/(?P<file_pk>[^/.]+)")
     def file_detail(self, request, pk=None, file_pk=None):
         resource = self.get_object()
@@ -191,6 +195,7 @@ class ResourceViewSet(viewsets.ReadOnlyModelViewSet):
         )
         return Response(serializer.data)
 
+    @extend_schema(operation_id="resource_tables_list")
     @action(detail=True, methods=["get"])
     def tables(self, request, pk=None):
         resource = self.get_object()
@@ -206,6 +211,7 @@ class ResourceViewSet(viewsets.ReadOnlyModelViewSet):
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
+    @extend_schema(operation_id="resource_table_retrieve")
     @action(detail=True, methods=["get"], url_path=r"tables/(?P<table_pk>[^/.]+)")
     def table_detail(self, request, pk=None, table_pk=None):
         resource = self.get_object()
@@ -238,6 +244,7 @@ class ResourceViewSet(viewsets.ReadOnlyModelViewSet):
         ).data
         return Response(payload)
 
+    @extend_schema(operation_id="resource_apis_list")
     @action(detail=True, methods=["get"])
     def apis(self, request, pk=None):
         resource = self.get_object()
@@ -253,6 +260,7 @@ class ResourceViewSet(viewsets.ReadOnlyModelViewSet):
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
+    @extend_schema(operation_id="resource_api_retrieve")
     @action(detail=True, methods=["get"], url_path=r"apis/(?P<api_pk>[^/.]+)")
     def api_detail(self, request, pk=None, api_pk=None):
         resource = self.get_object()
