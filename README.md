@@ -119,8 +119,8 @@ You can deploy on any container platform. Be sure to:
 
 ## Roadmap
 
-- [] Celery task queue for asynchronous processing
-- [] Fine grained permissions and roles
+- [x] Celery task queue for asynchronous processing
+- [x] Fine grained permissions and roles
 - [] Data versioning and history
 - [] More ingestion connectors (CSV, APIs, etc.)
 - [] Map creation and publishing tools
