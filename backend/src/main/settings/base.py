@@ -602,6 +602,19 @@ CACHES = {
 }
 
 ######################################################################
+# Celery
+######################################################################
+
+CELERY_BROKER_URL = os.environ.get(
+    "CELERY_BROKER_URL",
+    os.environ.get("VALKEY_URL", "redis://valkey:6379/0"),
+)
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+CELERY_TASK_TRACK_STARTED = _env_bool("CELERY_TASK_TRACK_STARTED", True)
+CELERY_TASK_TIME_LIMIT = _env_int("CELERY_TASK_TIME_LIMIT", 60 * 30)
+CELERY_TASK_SOFT_TIME_LIMIT = _env_int("CELERY_TASK_SOFT_TIME_LIMIT", 60 * 25)
+
+######################################################################
 # Rest Framework
 ######################################################################
 REST_FRAMEWORK = {
@@ -619,6 +632,13 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
     ],
+}
+
+# drf-spectacular settings
+SPECTACULAR_SETTINGS = {
+    # Only generate schema for API endpoints under /api/.
+    # This avoids warnings from unrelated endpoints (e.g., Wagtail's /dms/ API).
+    "SCHEMA_PATH_PREFIX": "/api/",
 }
 
 ######################################################################

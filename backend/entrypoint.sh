@@ -1,6 +1,13 @@
 #!/bin/sh
 set -e
 
+IS_CELERY="${IS_CELERY:-false}"
+
+if [ "$IS_CELERY" = "true" ]; then
+    echo "Celery container detected, skipping database setup and app bootstrap..."
+    exec "$@"
+fi
+
 # Check if the initialization has already been done and that we enabled automatic migration
 if [ "${DISABLE_DB_MIGRATIONS}" != "true" ] && [ ! -f ./db_status ]; then
     echo "Running database setup and migrations..."
